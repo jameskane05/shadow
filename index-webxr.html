@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebXR AR Recorder</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        color: #fff;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial,
+          sans-serif;
+      }
+      #overlay {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        background: rgba(0, 0, 0, 0.35);
+        pointer-events: auto;
+      }
+      #enter-ar-btn {
+        padding: 10px 16px;
+        border: 1px solid #888;
+        background: #111;
+        color: #fff;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      #status {
+        font-size: 14px;
+        opacity: 0.9;
+        text-align: center;
+        max-width: 92vw;
+      }
+      #record-indicator {
+        font-weight: 700;
+        color: #f44;
+      }
+      canvas {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="overlay">
+      <button id="enter-ar-btn">Enter AR</button>
+      <div id="status">
+        Press your controller trigger to <b>start/stop</b> recording head
+        poses.<br />
+        Recording: <span id="record-indicator">OFF</span>
+      </div>
+    </div>
+    <canvas id="gl-canvas"></canvas>
+
+    <script>
+      (function () {
+        const enterArButton = document.getElementById("enter-ar-btn");
+        const overlay = document.getElementById("overlay");
+        const recordIndicator = document.getElementById("record-indicator");
+        const canvas = document.getElementById("gl-canvas");
+
+        /** @type {XRSession|null} */
+        let xrSession = null;
+        /** @type {XRReferenceSpace|null} */
+        let xrRefSpace = null;
+        /** @type {WebGLRenderingContext|null} */
+        let gl = null;
+
+        let isRecording = false;
+        let recordStartTimeMs = 0;
+        /** @type {Array<{t:number,p:[number,number,number],q:[number,number,number,number]}>> */
+        let recordedFrames = [];
+
+        function setRecording(on) {
+          isRecording = on;
+          recordIndicator.textContent = on ? "ON" : "OFF";
+          recordIndicator.style.color = on ? "#3ef03e" : "#f44";
+        }
+
+        function log(msg) {
+          console.log("[AR-Recorder]", msg);
+        }
+
+        async function checkSupport() {
+          if (!("xr" in navigator)) {
+            enterArButton.disabled = true;
+            enterArButton.textContent = "WebXR not available";
+            return false;
+          }
+          const supported = await navigator.xr.isSessionSupported(
+            "immersive-ar"
+          );
+          if (!supported) {
+            enterArButton.disabled = true;
+            enterArButton.textContent = "immersive-ar not supported";
+          }
+          return supported;
+        }
+
+        function makeDownload(dataObj, filename) {
+          const blob = new Blob([JSON.stringify(dataObj, null, 2)], {
+            type: "application/json",
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        }
+
+        function stopAndSaveRecording() {
+          if (recordedFrames.length === 0) return;
+          const payload = {
+            version: 1,
+            referenceSpaceType:
+              xrRefSpace && xrRefSpace.type ? xrRefSpace.type : "local-floor",
+            coordinateSystem: "WebXR_right-handed_meters",
+            frames: recordedFrames,
+          };
+          const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+          makeDownload(payload, `ar-head-recording-${stamp}.json`);
+          log(`Saved ${recordedFrames.length} frames.`);
+          recordedFrames = [];
+        }
+
+        function onSelect() {
+          if (!isRecording) {
+            recordedFrames = [];
+            recordStartTimeMs = performance.now();
+            setRecording(true);
+            log("Recording started");
+          } else {
+            setRecording(false);
+            log("Recording stopped");
+            stopAndSaveRecording();
+          }
+        }
+
+        function onXRFrame(time, frame) {
+          xrSession.requestAnimationFrame(onXRFrame);
+          if (!xrRefSpace) return;
+          const pose = frame.getViewerPose(xrRefSpace);
+          if (pose && isRecording) {
+            const t = (time - recordStartTimeMs) / 1000;
+            const { position, orientation } = pose.transform;
+            recordedFrames.push({
+              t,
+              p: [position.x, position.y, position.z],
+              q: [orientation.x, orientation.y, orientation.z, orientation.w],
+            });
+          }
+        }
+
+        async function beginSession() {
+          const options = {
+            requiredFeatures: ["local-floor"],
+            optionalFeatures: ["dom-overlay", "unbounded"],
+            domOverlay: { root: overlay },
+          };
+          xrSession = await navigator.xr.requestSession(
+            "immersive-ar",
+            options
+          );
+
+          // Minimal WebGL setup so we can drive frames.
+          gl = canvas.getContext("webgl", { xrCompatible: true });
+          await gl.makeXRCompatible?.();
+          const xrLayer = new XRWebGLLayer(xrSession, gl);
+          xrSession.updateRenderState({ baseLayer: xrLayer });
+
+          xrRefSpace = await xrSession.requestReferenceSpace("local-floor");
+
+          xrSession.addEventListener("end", () => {
+            if (isRecording) {
+              setRecording(false);
+              stopAndSaveRecording();
+            }
+            xrSession = null;
+            xrRefSpace = null;
+          });
+
+          xrSession.addEventListener("select", onSelect);
+
+          xrSession.requestAnimationFrame(onXRFrame);
+        }
+
+        enterArButton.addEventListener("click", async () => {
+          try {
+            const ok = await checkSupport();
+            if (!ok) return;
+            await beginSession();
+          } catch (err) {
+            console.error(err);
+            alert("Failed to start AR session: " + err);
+          }
+        });
+
+        // Initial support check (non-blocking)
+        checkSupport();
+      })();
+    </script>
+  </body>
+</html>
