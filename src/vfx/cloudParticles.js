@@ -86,6 +86,7 @@ class CloudParticles {
   }
 
   init() {
+    console.log("🌫️ Initializing CPU-based fog system (cloudParticles.js)");
     const actualParticleCount = this.options.particleCount;
 
     // Store the actual count for external access

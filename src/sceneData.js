@@ -44,7 +44,7 @@ export const sceneObjects = {
   exterior: {
     id: "exterior",
     type: "splat",
-    path: "exterior-test-4.ply",
+    path: "/exterior-test-4.ply",
     description: "Main exterior environment splat mesh",
     position: { x: 0, y: 0, z: 0 },
     rotation: { x: 0, y: 0, z: 0 },

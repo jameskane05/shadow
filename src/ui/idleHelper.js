@@ -40,7 +40,9 @@ export class IdleHelper {
       // Hide any active animation immediately
       if (this.isAnimating) {
         this.stopAnimation();
-        this.helperElement.style.opacity = "0";
+        if (this.helperElement) {
+          this.helperElement.style.opacity = "0";
+        }
       }
     } else {
       // Reset timer on re-enable to avoid immediate popup
@@ -49,6 +51,14 @@ export class IdleHelper {
   }
 
   init() {
+    // Don't create helper on iOS (keyboard/mouse controls don't apply)
+    const currentState = this.gameManager?.getState?.();
+    const isIOS = currentState?.isIOS === true;
+    if (isIOS) {
+      console.log("IdleHelper: Skipping initialization on iOS device");
+      return;
+    }
+
     // Create the helper image element
     this.helperElement = document.createElement("div");
     this.helperElement.id = "idle-helper";
@@ -144,6 +154,11 @@ export class IdleHelper {
     if (hasGizmoInData) {
       return false;
     }
+    // Block on iOS devices (WASD/mouse controls don't apply)
+    const isIOS = currentState?.isIOS === true;
+    if (isIOS) {
+      return false;
+    }
     // Check if controls are enabled at all levels
     const isControlEnabled =
       this.gameManager && this.gameManager.isControlEnabled();
@@ -196,6 +211,12 @@ export class IdleHelper {
   }
 
   interruptWithFadeOut() {
+    // Skip if helper element doesn't exist (e.g., on iOS)
+    if (!this.helperElement) {
+      this.isAnimating = false;
+      return;
+    }
+
     // Cancel the current animation
     if (this.currentAnimation) {
       this.currentAnimation.cancel();
@@ -251,7 +272,9 @@ export class IdleHelper {
       if (!isFullyEnabled && this.wasControlEnabled) {
         if (this.isAnimating) {
           this.stopAnimation();
-          this.helperElement.style.opacity = "0";
+          if (this.helperElement) {
+            this.helperElement.style.opacity = "0";
+          }
         }
         // Don't reset lastMovementTime here - it will be reset when controls are re-enabled
       }
@@ -272,13 +295,16 @@ export class IdleHelper {
       // Update the previous camera animation state
       this.wasCameraAnimating = isCameraAnimating;
 
-      // If globally disabled or gizmo flag is set in game state, force hide and skip
+      // If globally disabled, gizmo flag is set, or iOS device, force hide and skip
       const currentState = this.gameManager?.getState?.();
       const hasGizmoInData = currentState?.hasGizmoInData === true;
-      if (this.globalDisable || hasGizmoInData) {
+      const isIOS = currentState?.isIOS === true;
+      if (this.globalDisable || hasGizmoInData || isIOS) {
         if (this.isAnimating) {
           this.stopAnimation();
-          this.helperElement.style.opacity = "0";
+          if (this.helperElement) {
+            this.helperElement.style.opacity = "0";
+          }
         }
         return;
       }
@@ -397,12 +423,20 @@ export class IdleHelper {
         this.isAnimating
       ) {
         this.stopAnimation();
-        this.helperElement.style.opacity = "0";
+        if (this.helperElement) {
+          this.helperElement.style.opacity = "0";
+        }
       }
     }, 100); // Check every 100ms for responsive gamepad detection
   }
 
   startAnimation() {
+    // Skip if helper element doesn't exist (e.g., on iOS)
+    if (!this.helperElement) {
+      this.isAnimating = false;
+      return;
+    }
+
     this.isAnimating = true;
 
     // Animation timings

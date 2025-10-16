@@ -37,6 +37,7 @@ export const lights = {
     rgbaBlendMode: "ADD_RGBA",
     sdfSmooth: 0.1,
     softEdge: 3, // Larger soft edge for gradual streetlight falloff
+    threeLightDuplicate: true, // Creates a Three.js PointLight at the same position
   },
 
   streetLight2: {

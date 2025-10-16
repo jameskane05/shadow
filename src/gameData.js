@@ -55,6 +55,10 @@ export const startScreen = {
 
   // Display state
   isFullscreen: false, // When true, the app is in fullscreen mode
+
+  // Platform detection (set by UIManager at initialization)
+  isIOS: false, // True if running on iOS (iPhone/iPad)
+  isFullscreenSupported: true, // True if Fullscreen API is supported (false on iOS)
 };
 
 export default startScreen;

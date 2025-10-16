@@ -126,26 +126,6 @@ class DialogManager {
   createCaptionElement() {
     const caption = document.createElement("div");
     caption.id = "dialog-caption";
-    caption.style.cssText = `
-      position: fixed;
-      bottom: 6.5%;
-      left: 50%;
-      transform: translateX(-50%);
-      background: transparent;
-      color: white;
-      padding: 20px 40px;
-      font-family: Arial, sans-serif;
-      font-size: clamp(18px, 3vw, 28px);
-      max-width: 90%;
-      width: auto;
-      text-align: center;
-      display: none;
-      z-index: 1000;
-      pointer-events: none;
-      line-height: 1.4;
-      box-sizing: border-box;
-      text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.9), 0 0 20px rgba(0, 0, 0, 0.7);
-    `;
     document.body.appendChild(caption);
     return caption;
   }
@@ -291,7 +271,6 @@ class DialogManager {
   showCaption(caption) {
     // HTML caption
     this.captionElement.textContent = caption.text;
-    this.captionElement.style.display = "block";
 
     this.captionTimer = 0;
     this.emit("dialog:caption", caption);
@@ -301,7 +280,7 @@ class DialogManager {
    * Hide caption
    */
   hideCaption() {
-    this.captionElement.style.display = "none";
+    this.captionElement.textContent = "";
   }
 
   /**

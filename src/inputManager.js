@@ -353,7 +353,7 @@ class InputManager {
       // Convert touch input to camera delta (scale by dt for frame-rate independence)
       const touchScale = 2.5; // Radians per second at full deflection
       deltaX += touchInput.x * touchScale * dt;
-      deltaY += touchInput.y * touchScale * dt;
+      deltaY -= touchInput.y * touchScale * dt; // Invert Y for natural camera movement
     }
 
     return { x: deltaX, y: deltaY, hasGamepad: hasGamepadInput };

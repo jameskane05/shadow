@@ -25,9 +25,15 @@ import CameraAnimationManager from "./cameraAnimationManager.js";
 import cameraAnimations from "./cameraAnimationData.js";
 import GizmoManager from "./gizmoManager.js";
 import { createCloudParticles } from "./vfx/cloudParticles.js";
+import { createCloudParticlesShader } from "./vfx/cloudParticlesShader.js";
 import DesaturationEffect from "./vfx/desaturationEffect.js";
 import GUI from "lil-gui";
 import "./styles/optionsMenu.css";
+import "./styles/dialog.css";
+
+// Toggle between CPU-based and shader-based fog systems
+// false = CPU-based (original), true = shader-based (GPU)
+const USE_SHADER_FOG = true;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(
@@ -130,7 +136,7 @@ const fogSpawnPosition =
 // Create rolling fog effect using Gaussian splats for proper depth sorting
 // IMPORTANT: Created BEFORE light manager so splat lights can affect the fog particles
 // Pass fogSpawnPosition so particles initialize around camera's initial location
-const cloudParticles = createCloudParticles(scene, {
+const fogOptions = {
   camera: camera,
   spawnPosition: fogSpawnPosition, // Use appropriate position based on game state
   particleCount: 4000, // Final particle count
@@ -147,7 +153,17 @@ const cloudParticles = createCloudParticles(scene, {
   groundLevel: -1, // Base ground level
   fogHeight: 6.0, // Height of fog layer
   fogFalloff: 1.3, // How quickly fog dissipates with height
-});
+};
+
+const cloudParticles = USE_SHADER_FOG
+  ? createCloudParticlesShader(scene, fogOptions)
+  : createCloudParticles(scene, fogOptions);
+
+console.log(
+  `Fog system loaded: ${
+    USE_SHADER_FOG ? "GPU Shader-based ⚡" : "CPU-based 🌫️"
+  }`
+);
 
 // Debug GUI for cloud particle parameters
 const debugGUI = new GUI({ title: "Cloud Particles Debug" });
@@ -502,8 +518,10 @@ renderer.setAnimationLoop(function animate(time) {
   // Always update audio-reactive lights
   lightManager.updateReactiveLights(dt);
 
-  // Update cloud particles
-  //cloudParticles.update(dt);
+  // Update cloud particles (shader-based version requires update call)
+  if (USE_SHADER_FOG) {
+    cloudParticles.update(dt);
+  }
 
   // Update desaturation effect animation
   desaturationEffect.update(dt);

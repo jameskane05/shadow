@@ -1,0 +1,36 @@
+/* Dialog Caption Styles */
+#dialog-caption {
+  position: fixed;
+  bottom: 6.5%;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: transparent;
+  color: white;
+  padding: 20px 40px;
+  font-family: Arial, sans-serif;
+  font-size: clamp(18px, 3vw, 28px);
+  max-width: 90%;
+  margin: 0 auto;
+  text-align: center;
+  z-index: 1000;
+  pointer-events: none;
+  line-height: 1.4;
+  box-sizing: border-box;
+  text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.9), 0 0 20px rgba(0, 0, 0, 0.7);
+}
+
+#dialog-caption:empty {
+  display: none;
+}
+
+/* Mobile: anchor caption to top instead of bottom */
+@media (max-width: 600px) {
+  #dialog-caption {
+    top: 6.5%;
+    bottom: auto;
+    padding: 15px 0px;
+  }
+}

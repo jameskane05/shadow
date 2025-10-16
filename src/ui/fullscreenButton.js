@@ -22,6 +22,18 @@ export class FullscreenButton {
   }
 
   /**
+   * Check if fullscreen is supported (from game state)
+   * @returns {boolean}
+   */
+  isFullscreenSupported() {
+    if (this.gameManager) {
+      const state = this.gameManager.getState();
+      return state.isFullscreenSupported !== false; // Default to true if not set
+    }
+    return true;
+  }
+
+  /**
    * Create the fullscreen button element
    */
   createButton() {
@@ -77,8 +89,31 @@ export class FullscreenButton {
       this.button.style.transform = "scale(1)";
     });
 
-    // Add click handler
-    this.button.addEventListener("click", () => {
+    // Add touch feedback (visual response on mobile)
+    this.button.addEventListener("touchstart", (e) => {
+      e.preventDefault(); // Prevent default touch behavior
+      this.button.style.transform = "scale(1.15)";
+      this.button.style.opacity = "1.0";
+    });
+
+    this.button.addEventListener("touchcancel", () => {
+      this.button.style.transform = "scale(1)";
+      this.button.style.opacity = this.config.style?.opacity || "1.0";
+    });
+
+    // Add click handler for mouse input
+    this.button.addEventListener("click", (e) => {
+      // Prevent if this was triggered by a touch (touchend also fires click)
+      if (e.pointerType === "touch") return;
+      this.toggleFullscreen();
+    });
+
+    // Add touch handler for mobile devices
+    this.button.addEventListener("touchend", (e) => {
+      e.preventDefault(); // Prevent click event from also firing
+      // Reset visual feedback
+      this.button.style.transform = "scale(1)";
+      this.button.style.opacity = this.config.style?.opacity || "1.0";
       this.toggleFullscreen();
     });
 
@@ -101,8 +136,13 @@ export class FullscreenButton {
       );
     }
 
-    // Button is visible by default - fullscreen should always be available
-    // (The button element is already added to the DOM above)
+    // Hide button if fullscreen is not supported (e.g., iOS)
+    if (!this.isFullscreenSupported()) {
+      this.button.style.display = "none";
+      console.log(
+        "FullscreenButton: Fullscreen API not supported on this device, button hidden"
+      );
+    }
   }
 
   /**
@@ -141,6 +181,12 @@ export class FullscreenButton {
    * Toggle fullscreen mode
    */
   toggleFullscreen() {
+    // Don't attempt if not supported
+    if (!this.isFullscreenSupported()) {
+      console.log("FullscreenButton: Fullscreen not supported on this device");
+      return;
+    }
+
     if (!document.fullscreenElement) {
       // Enter fullscreen
       document.documentElement.requestFullscreen().catch((err) => {
@@ -229,6 +275,11 @@ export class FullscreenButton {
    * Show the button
    */
   show() {
+    // Don't show if fullscreen is not supported
+    if (!this.isFullscreenSupported()) {
+      return;
+    }
+
     this.button.style.display = "block";
     if (this.uiManager) {
       this.uiManager.show(this.config.id || "fullscreen-button");

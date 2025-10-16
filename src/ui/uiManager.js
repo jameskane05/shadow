@@ -11,7 +11,7 @@
 
 import { IdleHelper } from "./idleHelper.js";
 import { FullscreenButton } from "./fullscreenButton.js";
-import { SplatCounter } from "./splatCounter.js";
+// import { SplatCounter } from "./splatCounter.js";
 import { uiElements } from "./uiData.js";
 
 export class UIManager {
@@ -46,6 +46,39 @@ export class UIManager {
       splatCounter: null,
       // Add more as needed
     };
+
+    // Detect platform and set game state
+    this.detectPlatform();
+  }
+
+  /**
+   * Detect platform capabilities and update game state
+   */
+  detectPlatform() {
+    // Detect iOS (which doesn't support fullscreen API)
+    const isIOS =
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1); // iPad with iOS 13+
+
+    // Check if any fullscreen API is available
+    const isFullscreenSupported =
+      !isIOS &&
+      (document.fullscreenEnabled ||
+        document.webkitFullscreenEnabled ||
+        document.mozFullScreenEnabled ||
+        document.msFullscreenEnabled);
+
+    // Update game state
+    if (this.gameManager) {
+      this.gameManager.setState({
+        isIOS: isIOS,
+        isFullscreenSupported: isFullscreenSupported,
+      });
+    }
+
+    console.log(
+      `UIManager: Platform detected - iOS: ${isIOS}, Fullscreen supported: ${isFullscreenSupported}`
+    );
   }
 
   /**
@@ -84,19 +117,6 @@ export class UIManager {
       gameManager: this.gameManager,
       config: uiElements.FULLSCREEN_BUTTON,
     });
-
-    // Initialize splat counter (debug overlay)
-    if (sparkRenderer) {
-      const splatCounterElement = this.createElementFromConfig(
-        uiElements.SPLAT_COUNTER
-      );
-      this.components.splatCounter = new SplatCounter(
-        splatCounterElement,
-        sparkRenderer
-      );
-    }
-
-    console.log("UIManager: Components initialized");
   }
 
   /**

@@ -135,6 +135,52 @@ class LightManager {
   }
 
   /**
+   * Create a Three.js light duplicate for a splat light
+   * @param {Object} config - Splat light configuration
+   * @returns {THREE.Light|null}
+   */
+  createThreeLightDuplicate(config) {
+    // Get duplicate configuration (can be boolean true or an object with overrides)
+    const duplicateConfig =
+      typeof config.threeLightDuplicate === "object"
+        ? config.threeLightDuplicate
+        : {};
+
+    // Convert splat color to hex
+    const colorHex = new THREE.Color(
+      config.color.r,
+      config.color.g,
+      config.color.b
+    ).getHex();
+
+    // Default to PointLight
+    const lightType = duplicateConfig.type || "PointLight";
+
+    // Build Three.js light config
+    const threeLightConfig = {
+      id: `${config.id}-three-duplicate`,
+      type: lightType,
+      color: duplicateConfig.color ?? colorHex,
+      intensity: duplicateConfig.intensity ?? 1.0,
+      position: duplicateConfig.position ?? config.position,
+      distance: duplicateConfig.distance ?? 0,
+      decay: duplicateConfig.decay ?? 2,
+      castShadow: duplicateConfig.castShadow ?? false,
+    };
+
+    // Create the light
+    const light = this.createLight(threeLightConfig);
+
+    if (light) {
+      console.log(
+        `LightManager: Created Three.js duplicate light for "${config.id}"`
+      );
+    }
+
+    return light;
+  }
+
+  /**
    * Create an ambient light
    * @param {Object} config - Light configuration
    * @returns {THREE.AmbientLight}

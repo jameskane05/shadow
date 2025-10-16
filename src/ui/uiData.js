@@ -32,26 +32,26 @@ export const uiElements = {
     pausesGame: false,
   },
 
-  SPLAT_COUNTER: {
-    id: "splat-counter",
-    layer: "DEBUG",
-    position: {
-      top: "10px",
-      left: "10px",
-    },
-    style: {
-      position: "fixed",
-      color: "white",
-      fontFamily: "monospace",
-      fontSize: "14px",
-      backgroundColor: "rgba(0, 0, 0, 0.5)",
-      padding: "8px 12px",
-      borderRadius: "4px",
-      pointerEvents: "none",
-    },
-    blocksInput: false,
-    pausesGame: false,
-  },
+  // SPLAT_COUNTER: {
+  //   id: "splat-counter",
+  //   layer: "DEBUG",
+  //   position: {
+  //     top: "10px",
+  //     left: "10px",
+  //   },
+  //   style: {
+  //     position: "fixed",
+  //     color: "white",
+  //     fontFamily: "monospace",
+  //     fontSize: "14px",
+  //     backgroundColor: "rgba(0, 0, 0, 0.5)",
+  //     padding: "8px 12px",
+  //     borderRadius: "4px",
+  //     pointerEvents: "none",
+  //   },
+  //   blocksInput: false,
+  //   pausesGame: false,
+  // },
 };
 
 export default uiElements;
