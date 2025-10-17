@@ -81,6 +81,7 @@ const spark = new SparkRenderer({
   apertureAngle: apertureAngle,
   focalDistance: focalDistance,
 });
+spark.renderOrder = 9998;
 scene.add(spark);
 
 // Initialize scene manager (objects will be loaded by gameManager based on state)
@@ -155,18 +156,18 @@ const fogOptions = {
   particleSizeMin: 1, // Min size multiplier (0.5x base size)
   particleSizeMax: 1.5, // Max size multiplier (1.5x base size)
   windSpeed: -0.5, // Starting wind speed (will transition to -1)
-  opacity: 0.035,
+  opacity: 0.03,
   color: 0xffffff, // Darker gray so splat lights are more visible
-  fluffiness: 10, // More vertical variation for rolling effect
-  turbulence: 1, // More horizontal variation for swirling
+  fluffiness: 8, // More vertical variation for rolling effect
+  turbulence: 3, // More horizontal variation for swirling
   // Ground fog parameters
   groundLevel: -1, // Base ground level
-  fogHeight: 6.0, // Height of fog layer
+  fogHeight: 7.0, // Height of fog layer
   fogFalloff: 1.3, // How quickly fog dissipates with height
 };
 
 const cloudParticles = USE_SHADER_FOG
-  ? createCloudParticlesShader(scene, fogOptions)
+  ? createCloudParticlesShader(scene, camera)
   : createCloudParticles(scene, fogOptions);
 
 console.log(
@@ -179,34 +180,22 @@ console.log(
 const debugGUI = new GUI({ title: "Cloud Particles Debug" });
 
 const windFolder = debugGUI.addFolder("Wind");
-windFolder
-  .add(cloudParticles.options, "windSpeed", -5, 0, 0.1)
-  .name("Wind Speed");
+windFolder.add(cloudParticles, "windSpeed", -5, 0, 0.1).name("Wind Speed");
 
 const movementFolder = debugGUI.addFolder("Movement");
-movementFolder
-  .add(cloudParticles.options, "fluffiness", 0, 10, 0.1)
-  .name("Fluffiness");
-movementFolder
-  .add(cloudParticles.options, "turbulence", 0, 5, 0.1)
-  .name("Turbulence");
+movementFolder.add(cloudParticles, "fluffiness", 0, 10, 0.1).name("Fluffiness");
+movementFolder.add(cloudParticles, "turbulence", 0, 5, 0.1).name("Turbulence");
 
 const areaFolder = debugGUI.addFolder("Area");
 areaFolder
-  .add(cloudParticles.options, "cloudSize", 10, 100, 5)
+  .add(cloudParticles, "cloudSize", 10, 100, 5)
   .name("Cloud Size")
   .onChange(() => {
     console.warn("cloudSize change requires respawn to take full effect");
   });
-areaFolder
-  .add(cloudParticles.options, "groundLevel", -5, 5, 0.1)
-  .name("Ground Level");
-areaFolder
-  .add(cloudParticles.options, "fogHeight", 1, 20, 0.5)
-  .name("Fog Height");
-areaFolder
-  .add(cloudParticles.options, "fogFalloff", 0.1, 5, 0.1)
-  .name("Fog Falloff");
+areaFolder.add(cloudParticles, "groundLevel", -5, 5, 0.1).name("Ground Level");
+areaFolder.add(cloudParticles, "fogHeight", 1, 20, 0.5).name("Fog Height");
+areaFolder.add(cloudParticles, "fogFalloff", 0.1, 5, 0.1).name("Fog Falloff");
 
 // Close folders by default for cleaner UI
 windFolder.close();

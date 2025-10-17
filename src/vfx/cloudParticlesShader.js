@@ -8,29 +8,25 @@ import { SplatMesh, dyno } from "@sparkjsdev/spark";
  */
 
 class CloudParticlesShader {
-  constructor(scene, options = {}) {
+  constructor(scene, camera = null) {
     this.scene = scene;
-    this.camera = options.camera || null;
-    this.spawnPosition = options.spawnPosition || null;
-    this.options = {
-      particleCount: options.particleCount || 1000,
-      cloudSize: options.cloudSize || 50,
-      particleSize: options.particleSize || 0.12,
-      particleSizeMin:
-        options.particleSizeMin !== undefined ? options.particleSizeMin : 0.5,
-      particleSizeMax:
-        options.particleSizeMax !== undefined ? options.particleSizeMax : 1.5,
-      windSpeed: options.windSpeed || -1.3,
-      opacity: options.opacity || 0.4,
-      color: options.color || 0xffffff,
-      fluffiness: options.fluffiness || 0.5,
-      turbulence: options.turbulence || 0.3,
-      groundLevel:
-        options.groundLevel !== undefined ? options.groundLevel : 0.0,
-      fogHeight: options.fogHeight || 3.0,
-      fogFalloff: options.fogFalloff || 2.0,
-      ...options,
-    };
+    this.camera = camera;
+    this.spawnPosition = null;
+
+    // Fog settings - edit these directly
+    this.particleCount = 4000;
+    this.cloudSize = 40;
+    this.particleSize = 1.5;
+    this.particleSizeMin = 1;
+    this.particleSizeMax = 1.5;
+    this.windSpeed = -0.5;
+    this.opacity = 0.03;
+    this.color = 0xffffff;
+    this.fluffiness = 8;
+    this.turbulence = 3;
+    this.groundLevel = -1;
+    this.fogHeight = 7.0;
+    this.fogFalloff = 1.3;
 
     this.splatMesh = null;
     this.splatCount = 0;
@@ -39,16 +35,16 @@ class CloudParticlesShader {
 
     // Dyno uniforms for shader animation
     this.dynoTime = dyno.dynoFloat(0);
-    this.dynoWindSpeed = dyno.dynoFloat(this.options.windSpeed);
-    this.dynoOpacity = dyno.dynoFloat(this.options.opacity);
-    this.dynoCloudSize = dyno.dynoFloat(this.options.cloudSize);
-    this.dynoFluffiness = dyno.dynoFloat(this.options.fluffiness);
-    this.dynoGroundLevel = dyno.dynoFloat(this.options.groundLevel);
-    this.dynoFogHeight = dyno.dynoFloat(this.options.fogHeight);
+    this.dynoWindSpeed = dyno.dynoFloat(this.windSpeed);
+    this.dynoOpacity = dyno.dynoFloat(this.opacity);
+    this.dynoCloudSize = dyno.dynoFloat(this.cloudSize);
+    this.dynoFluffiness = dyno.dynoFloat(this.fluffiness);
+    this.dynoGroundLevel = dyno.dynoFloat(this.groundLevel);
+    this.dynoFogHeight = dyno.dynoFloat(this.fogHeight);
     this.dynoOriginX = dyno.dynoFloat(0);
     this.dynoOriginY = dyno.dynoFloat(0);
     this.dynoOriginZ = dyno.dynoFloat(0);
-    this.dynoParticleCount = dyno.dynoFloat(this.options.particleCount);
+    this.dynoParticleCount = dyno.dynoFloat(this.particleCount);
     this.dynoCameraX = dyno.dynoFloat(0);
     this.dynoCameraY = dyno.dynoFloat(0);
     this.dynoCameraZ = dyno.dynoFloat(0);
@@ -60,6 +56,27 @@ class CloudParticlesShader {
     this.transitionStartValues = {};
     this.transitionTargetValues = {};
 
+    // Wind variation state
+    this.baseWindSpeed = this.windSpeed; // Store initial wind speed
+    this.windVariationEnabled = false; // DISABLED: causes jumps due to shader recalculation from initial position
+
+    // Opacity variation state (this works great because opacity doesn't accumulate over time!)
+    this.baseOpacity = this.opacity; // Store initial opacity
+    this.opacityVariationEnabled = true;
+    this.opacityVariationMin = 0.5; // Min multiplier (e.g., 0.5 = 50% of base)
+    this.opacityVariationMax = 1.15; // Max multiplier (e.g., 1.5 = 150% of base)
+    this.opacityVariationHoldTimeMin = 5; // Min seconds to wait before next change
+    this.opacityVariationHoldTimeMax = 15; // Max seconds to wait before next change
+    this.nextOpacityChangeTime =
+      this.opacityVariationHoldTimeMin +
+      Math.random() *
+        (this.opacityVariationHoldTimeMax - this.opacityVariationHoldTimeMin);
+    this.opacityTransitionStart = 0;
+    this.opacityTransitionDuration = 2; // How long to transition in seconds
+    this.opacityTransitionStartValue = this.opacity;
+    this.opacityTransitionTargetValue = this.opacity;
+    this.isTransitioningOpacity = false;
+
     this.init();
   }
 
@@ -67,8 +84,7 @@ class CloudParticlesShader {
     console.log(
       "⚡ Initializing GPU shader-based fog system (cloudParticlesShader.js)"
     );
-    const actualParticleCount = this.options.particleCount;
-    this.splatCount = actualParticleCount;
+    this.splatCount = this.particleCount;
 
     // Determine world origin for coordinate system
     if (this.spawnPosition) {
@@ -88,13 +104,13 @@ class CloudParticlesShader {
     this.dynoOriginY.value = this.worldOrigin.y;
     this.dynoOriginZ.value = this.worldOrigin.z;
 
-    const color = new THREE.Color(this.options.color);
+    const color = new THREE.Color(this.color);
 
     // Create SplatMesh with onFrame callback - transformations auto-detected, no updateVersion needed
     this.splatMesh = new SplatMesh({
-      maxSplats: actualParticleCount,
+      maxSplats: this.particleCount,
       constructSplats: (splats) => {
-        this.createCloudSplats(splats, actualParticleCount, color);
+        this.createCloudSplats(splats, this.particleCount, color);
       },
       onFrame: ({ mesh, time, deltaTime }) => {
         // Update time uniform
@@ -111,8 +127,13 @@ class CloudParticlesShader {
         // Handle transitions
         this.handleTransitions(time);
 
-        // For dyno shader modifications, we DO need updateVersion()
-        // (different from simple transformations)
+        // Handle wind variation
+        this.handleWindVariation(time);
+
+        // Handle opacity variation
+        this.handleOpacityVariation(time);
+
+        // For objectModifier with position changes, we need updateVersion()
         mesh.updateVersion();
       },
     });
@@ -129,8 +150,8 @@ class CloudParticlesShader {
     const playerPos = this.worldOrigin;
 
     // Establish wind-aligned basis
-    let baseWX = this.options.windSpeed * 0.3;
-    let baseWZ = this.options.windSpeed * 1.0;
+    let baseWX = this.windSpeed * 0.3;
+    let baseWZ = this.windSpeed * 1.0;
     let baseWMag = Math.sqrt(baseWX * baseWX + baseWZ * baseWZ);
     if (baseWMag < 1e-5) {
       baseWX = -0.3;
@@ -154,11 +175,11 @@ class CloudParticlesShader {
 
       // Vary particle size
       const sizeVariation = THREE.MathUtils.lerp(
-        this.options.particleSizeMin,
-        this.options.particleSizeMax,
+        this.particleSizeMin,
+        this.particleSizeMax,
         random.w
       );
-      const particleSize = this.options.particleSize * sizeVariation;
+      const particleSize = this.particleSize * sizeVariation;
       const scales = new THREE.Vector3(
         particleSize,
         particleSize * 0.6,
@@ -166,46 +187,40 @@ class CloudParticlesShader {
       );
 
       // Use exponential distribution for height
-      const heightBias = Math.pow(random.y, this.options.fogFalloff);
+      const heightBias = Math.pow(random.y, this.fogFalloff);
 
       // Spawn particles uniformly in wind-aligned rectangular box
-      const u0 = (random.x - 0.5) * 2 * this.options.cloudSize;
-      const v0 = (random.z - 0.5) * 2 * this.options.cloudSize;
+      const u0 = (random.x - 0.5) * 2 * this.cloudSize;
+      const v0 = (random.z - 0.5) * 2 * this.cloudSize;
 
       let x = playerPos.x + upX0 * u0 + perpX0 * v0;
       let y = THREE.MathUtils.lerp(
-        this.options.groundLevel,
-        this.options.groundLevel + this.options.fogHeight,
+        this.groundLevel,
+        this.groundLevel + this.fogHeight,
         heightBias
       );
       let z = playerPos.z + upZ0 * u0 + perpZ0 * v0;
 
       // Apply small initial vertical variation
       const fluffiness =
-        Math.sin(random.w * Math.PI * 2) * this.options.fluffiness * 0.1;
+        Math.sin(random.w * Math.PI * 2) * this.fluffiness * 0.1;
       y += fluffiness;
 
       // Clamp Y
       y = Math.max(
-        this.options.groundLevel,
-        Math.min(this.options.groundLevel + this.options.fogHeight, y)
+        this.groundLevel,
+        Math.min(this.groundLevel + this.fogHeight, y)
       );
 
       // Opacity falloff with height
-      const heightFactor =
-        (y - this.options.groundLevel) / this.options.fogHeight;
+      const heightFactor = (y - this.groundLevel) / this.fogHeight;
       const heightOpacity = Math.pow(heightFactor, 0.5);
       const opacityFactor = heightOpacity * (0.7 + 0.3 * random.w);
       const baseOpacity = Math.max(0.05, opacityFactor);
-      const opacity = this.options.opacity * baseOpacity;
-
-      // Encode particle index into color's blue channel (will extract in shader)
-      // Normalize index to 0-1 range for encoding
-      const indexEncoded = i / particleCount;
-      const colorWithIndex = new THREE.Color(color.r, color.g, indexEncoded);
+      const opacity = this.opacity * baseOpacity;
 
       center.set(x, y, z);
-      splats.pushSplat(center, scales, quaternion, opacity, colorWithIndex);
+      splats.pushSplat(center, scales, quaternion, opacity, color);
     }
   }
 
@@ -264,20 +279,15 @@ class CloudParticlesShader {
             dyno.unindentLines(`
             ${outputs.gsplat} = ${inputs.gsplat};
             
-            // Extract particle index from blue channel (encoded during creation)
-            float indexNormalized = ${inputs.gsplat}.rgba.b;
-            float particleIndex = indexNormalized * ${inputs.particleCount};
-            float seed = particleIndex * 0.12345;
+            // Get initial position and generate per-particle seed (deterministic)
+            vec3 initialPos = ${inputs.gsplat}.center;
+            float seed = dot(initialPos, vec3(12.9898, 78.233, 37.719));
             vec4 random = hash4(seed);
-            
-            // Restore original white color
-            ${outputs.gsplat}.rgba.b = 1.0;
             
             // Store original opacity for height-based modulation
             float baseOpacity = ${inputs.gsplat}.rgba.a;
             
-            // Get initial position (spawned randomly in volume)
-            vec3 initialPos = ${inputs.gsplat}.center;
+            // Calculate local position relative to origin
             vec3 origin = vec3(${inputs.originX}, ${inputs.originY}, ${inputs.originZ});
             vec3 localPos = initialPos - origin;
             
@@ -290,9 +300,13 @@ class CloudParticlesShader {
             
             float time = ${inputs.t};
             
-            // Apply wind drift
-            vec3 windDirection = vec3(${inputs.windSpeed} * 0.3, 0.0, ${inputs.windSpeed} * 1.0);
-            localPos += windDirection * time;
+            // Apply wind drift (use modulo to prevent infinite acceleration)
+            // Wrap time to a period that covers 2x the cloud size to ensure smooth cycling
+            float windSpeed = ${inputs.windSpeed};
+            float driftPeriod = (${inputs.cloudSize} * 4.0) / abs(windSpeed + 0.0001); // Time to drift across 2x cloud diameter
+            float wrappedTime = mod(time, driftPeriod);
+            vec3 windDirection = vec3(windSpeed * 0.3, 0.0, windSpeed * 1.0);
+            localPos += windDirection * wrappedTime;
             
             // Add lateral oscillation
             float lateralOffset = lateralSpeed * sin(phase + time * lateralFreq);
@@ -361,29 +375,167 @@ class CloudParticlesShader {
     const elapsed = time - this.transitionStartTime;
     const t = Math.min(elapsed / this.transitionDuration, 1.0);
 
-    // Lerp runtime parameters
+    // Lerp runtime parameters (but skip windSpeed - handled by handleWindVariation)
     if ("windSpeed" in this.transitionTargetValues) {
-      this.options.windSpeed = THREE.MathUtils.lerp(
+      this.windSpeed = THREE.MathUtils.lerp(
         this.transitionStartValues.windSpeed,
         this.transitionTargetValues.windSpeed,
         t
       );
-      this.dynoWindSpeed.value = this.options.windSpeed;
+      this.dynoWindSpeed.value = this.windSpeed;
+      // Update base wind speed for manual transitions
+      if (t >= 1.0) {
+        this.baseWindSpeed = this.windSpeed;
+      }
     }
 
     if ("opacity" in this.transitionTargetValues) {
-      this.options.opacity = THREE.MathUtils.lerp(
+      this.opacity = THREE.MathUtils.lerp(
         this.transitionStartValues.opacity,
         this.transitionTargetValues.opacity,
         t
       );
-      this.dynoOpacity.value = this.options.opacity;
+      this.dynoOpacity.value = this.opacity;
     }
 
     // End transition
     if (t >= 1.0) {
       console.log("Fog transition complete (shader)");
       this.isTransitioning = false;
+    }
+  }
+
+  handleOpacityVariation(time) {
+    if (!this.opacityVariationEnabled) return;
+
+    // Check if we need to start a new opacity change
+    if (
+      !this.isTransitioningOpacity &&
+      !this.isTransitioning &&
+      time >= this.nextOpacityChangeTime
+    ) {
+      // Pick a new target opacity based on configured multipliers
+      const minOpacity = Math.max(
+        0.1,
+        this.baseOpacity * this.opacityVariationMin
+      );
+      const maxOpacity = this.baseOpacity * this.opacityVariationMax;
+      this.opacityTransitionTargetValue =
+        minOpacity + Math.random() * (maxOpacity - minOpacity);
+
+      console.log(
+        `💨 Fog opacity change: ${this.opacity.toFixed(
+          2
+        )} → ${this.opacityTransitionTargetValue.toFixed(
+          2
+        )} over ${this.opacityTransitionDuration.toFixed(
+          1
+        )}s (base: ${this.baseOpacity.toFixed(2)})`
+      );
+      this.opacityTransitionStart = time;
+      this.opacityTransitionStartValue = this.opacity;
+      this.isTransitioningOpacity = true;
+    }
+
+    // Lerp opacity towards target if transitioning
+    if (this.isTransitioningOpacity) {
+      const elapsed = time - this.opacityTransitionStart;
+      const t = Math.min(elapsed / this.opacityTransitionDuration, 1.0);
+
+      this.opacity = THREE.MathUtils.lerp(
+        this.opacityTransitionStartValue,
+        this.opacityTransitionTargetValue,
+        t
+      );
+      this.dynoOpacity.value = this.opacity;
+
+      // Check if transition is complete
+      if (t >= 1.0) {
+        this.isTransitioningOpacity = false;
+        console.log(
+          `  Fog opacity transition complete at ${this.opacity.toFixed(2)}`
+        );
+        // Schedule next opacity change
+        const holdTime =
+          this.opacityVariationHoldTimeMin +
+          Math.random() *
+            (this.opacityVariationHoldTimeMax -
+              this.opacityVariationHoldTimeMin);
+        this.nextOpacityChangeTime = time + holdTime;
+        console.log(`  Next opacity change in ${holdTime.toFixed(1)}s`);
+      }
+    }
+  }
+
+  handleWindVariation(time) {
+    if (!this.windVariationEnabled) return;
+
+    // Check if we need to start a new wind change (only when not currently transitioning or manually transitioning)
+    if (
+      !this.isTransitioningWind &&
+      !this.isTransitioning &&
+      time >= this.nextWindChangeTime
+    ) {
+      // Pick a new target wind speed within +/- 1 of base wind speed, ensuring it stays negative
+      // Calculate range: base ± 1, but clamp to stay between base-1 and -0.1
+      const minSpeed = this.baseWindSpeed - 1; // More negative (stronger wind)
+      const maxSpeed = Math.min(this.baseWindSpeed + 1, -0.1); // Less negative (weaker wind), but always negative
+      const targetSpeed = minSpeed + Math.random() * (maxSpeed - minSpeed);
+
+      // Extra safety: ensure target is always negative
+      this.windTransitionTargetValue = Math.min(targetSpeed, -0.1);
+
+      // Pick a random transition duration (8-10 seconds for gradual changes)
+      this.windTransitionDuration = 8 + Math.random() * 2;
+
+      console.log(
+        `🌬️ Wind change: ${this.windSpeed.toFixed(
+          2
+        )} → ${this.windTransitionTargetValue.toFixed(
+          2
+        )} over ${this.windTransitionDuration.toFixed(
+          1
+        )}s (base: ${this.baseWindSpeed.toFixed(2)}, range: ${minSpeed.toFixed(
+          2
+        )} to ${maxSpeed.toFixed(2)})`
+      );
+      this.windTransitionStart = time;
+      this.windTransitionStartValue = this.windSpeed;
+      this.isTransitioningWind = true;
+    }
+
+    // Lerp wind speed towards target if transitioning
+    if (this.isTransitioningWind) {
+      const elapsed = time - this.windTransitionStart;
+      const t = Math.min(elapsed / this.windTransitionDuration, 1.0);
+
+      this.windSpeed = THREE.MathUtils.lerp(
+        this.windTransitionStartValue,
+        this.windTransitionTargetValue,
+        t
+      );
+      this.dynoWindSpeed.value = this.windSpeed;
+
+      // Debug: log transition progress every second
+      if (Math.floor(elapsed) !== Math.floor(elapsed - 0.016)) {
+        console.log(
+          `  Wind lerp progress: t=${t.toFixed(
+            2
+          )}, speed=${this.windSpeed.toFixed(2)}`
+        );
+      }
+
+      // Check if transition is complete
+      if (t >= 1.0) {
+        this.isTransitioningWind = false;
+        console.log(
+          `  Wind transition complete at ${this.windSpeed.toFixed(2)}`
+        );
+        // Schedule next wind change (5-15 seconds from now for proper hold time)
+        const holdTime = 5 + Math.random() * 10;
+        this.nextWindChangeTime = time + holdTime;
+        console.log(`  Next wind change in ${holdTime.toFixed(1)}s`);
+      }
     }
   }
 
@@ -410,26 +562,24 @@ class CloudParticlesShader {
 
     animatableParams.forEach((param) => {
       if (param in targetParams) {
-        this.transitionStartValues[param] = this.options[param];
+        this.transitionStartValues[param] = this[param];
         this.transitionTargetValues[param] = targetParams[param];
-        console.log(
-          `  ${param}: ${this.options[param]} → ${targetParams[param]}`
-        );
+        console.log(`  ${param}: ${this[param]} → ${targetParams[param]}`);
       }
     });
   }
 
   setColor(color) {
-    this.options.color = color;
+    this.color = color;
   }
 
   setOpacity(opacity) {
-    this.options.opacity = opacity;
+    this.opacity = opacity;
     this.dynoOpacity.value = opacity;
   }
 
   setSize(size) {
-    this.options.particleSize = size;
+    this.particleSize = size;
   }
 
   dispose() {
@@ -441,8 +591,8 @@ class CloudParticlesShader {
 }
 
 // Factory function
-export function createCloudParticlesShader(scene, options = {}) {
-  return new CloudParticlesShader(scene, options);
+export function createCloudParticlesShader(scene, camera = null) {
+  return new CloudParticlesShader(scene, camera);
 }
 
 // Export class as default
