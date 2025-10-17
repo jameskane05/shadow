@@ -496,49 +496,6 @@ class CloudParticles {
     });
   }
 
-  recreateMesh() {
-    console.log("Recreating fog mesh with:", {
-      particleCount: this.options.particleCount,
-      particleSize: this.options.particleSize,
-    });
-
-    // Remove old mesh
-    if (this.splatMesh) {
-      this.scene.remove(this.splatMesh);
-      this.splatMesh.dispose();
-    }
-
-    // Reinitialize with new particle count/size
-    const actualParticleCount = this.options.particleCount;
-    this.splatCount = actualParticleCount;
-
-    // Reallocate arrays
-    this.uCoord = new Float32Array(actualParticleCount);
-    this.vCoord = new Float32Array(actualParticleCount);
-    this.heightT = new Float32Array(actualParticleCount);
-    this.phase = new Float32Array(actualParticleCount);
-    this.lateralSpeed = new Float32Array(actualParticleCount);
-    this.lateralFreq = new Float32Array(actualParticleCount);
-    this.verticalAmp = new Float32Array(actualParticleCount);
-    this.verticalFreq = new Float32Array(actualParticleCount);
-    this.baseOpacity = new Float32Array(actualParticleCount);
-
-    const color = new THREE.Color(this.options.color);
-
-    // Create new mesh
-    this.splatMesh = new SplatMesh({
-      maxSplats: actualParticleCount,
-      constructSplats: (splats) => {
-        this.createCloudSplats(splats, actualParticleCount, color);
-      },
-      onFrame: ({ mesh, time, deltaTime }) => {
-        this.animateCloudSplats(mesh, time, deltaTime);
-      },
-    });
-
-    this.scene.add(this.splatMesh);
-  }
-
   dispose() {
     if (this.splatMesh) {
       this.scene.remove(this.splatMesh);

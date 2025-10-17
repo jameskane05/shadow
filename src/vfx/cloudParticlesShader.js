@@ -432,35 +432,6 @@ class CloudParticlesShader {
     this.options.particleSize = size;
   }
 
-  recreateMesh() {
-    console.log("Recreating fog mesh (shader) with:", {
-      particleCount: this.options.particleCount,
-      particleSize: this.options.particleSize,
-    });
-
-    // Remove old mesh
-    if (this.splatMesh) {
-      this.scene.remove(this.splatMesh);
-      this.splatMesh.dispose();
-    }
-
-    // Reinitialize
-    const actualParticleCount = this.options.particleCount;
-    this.splatCount = actualParticleCount;
-
-    const color = new THREE.Color(this.options.color);
-
-    this.splatMesh = new SplatMesh({
-      maxSplats: actualParticleCount,
-      constructSplats: (splats) => {
-        this.createCloudSplats(splats, actualParticleCount, color);
-      },
-    });
-
-    this.setupSplatModifier();
-    this.scene.add(this.splatMesh);
-  }
-
   dispose() {
     if (this.splatMesh) {
       this.scene.remove(this.splatMesh);
