@@ -36,12 +36,22 @@ const stateOverrides = {
     // No playerPosition - use main.js default
   },
 
+  NEAR_RADIO: {
+    isPlaying: true,
+    controlEnabled: true,
+    playerPosition: {
+      x: sceneObjects.radio.position.x,
+      y: 0.8,
+      z: sceneObjects.radio.position.z - 4,
+    },
+  },
+
   PHONE_BOOTH_RINGING: {
     isPlaying: true,
     controlEnabled: true,
     playerPosition: {
       x: sceneObjects.phonebooth.position.x + 5,
-      y: 0.9,
+      y: 0.8,
       z: sceneObjects.phonebooth.position.z - 8,
     },
   },
@@ -51,7 +61,7 @@ const stateOverrides = {
     controlEnabled: true,
     playerPosition: {
       x: sceneObjects.phonebooth.position.x,
-      y: 0.9,
+      y: 0.4,
       z: sceneObjects.phonebooth.position.z,
     },
   },
@@ -69,6 +79,16 @@ const stateOverrides = {
   DRIVE_BY: {
     isPlaying: true,
     controlEnabled: true,
+  },
+
+  POST_DRIVE_BY: {
+    isPlaying: true,
+    controlEnabled: true,
+    playerPosition: {
+      x: sceneObjects.phonebooth.position.x,
+      y: 0.8,
+      z: sceneObjects.phonebooth.position.z - 8,
+    },
   },
 };
 

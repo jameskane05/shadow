@@ -27,9 +27,17 @@ import GizmoManager from "./gizmoManager.js";
 import { createCloudParticles } from "./vfx/cloudParticles.js";
 import { createCloudParticlesShader } from "./vfx/cloudParticlesShader.js";
 import DesaturationEffect from "./vfx/desaturationEffect.js";
+import { LoadingScreen } from "./loadingScreen.js";
 import GUI from "lil-gui";
 import "./styles/optionsMenu.css";
 import "./styles/dialog.css";
+import "./styles/loadingScreen.css";
+
+// Initialize loading screen immediately (before any asset loading)
+const loadingScreen = new LoadingScreen();
+
+// Register loading tasks (scene assets and audio files will register themselves as they load)
+loadingScreen.registerTask("initialization", 1);
 
 // Toggle between CPU-based and shader-based fog systems
 // false = CPU-based (original), true = shader-based (GPU)
@@ -47,6 +55,7 @@ scene.add(camera); // Add camera to scene so its children render
 
 const renderer = new THREE.WebGLRenderer({ alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.domElement.style.opacity = "0"; // Hide renderer until loading is complete
 document.body.appendChild(renderer.domElement);
 
 // Create desaturation post-processing effect
@@ -75,7 +84,8 @@ const spark = new SparkRenderer({
 scene.add(spark);
 
 // Initialize scene manager (objects will be loaded by gameManager based on state)
-const sceneManager = new SceneManager(scene);
+// Pass loadingScreen for progress tracking
+const sceneManager = new SceneManager(scene, { loadingScreen });
 
 // Make scene manager globally accessible for mesh lookups
 window.sceneManager = sceneManager;
@@ -221,6 +231,7 @@ const lightManager = new LightManager(scene);
 const sfxManager = new SFXManager({
   masterVolume: 0.5,
   lightManager: lightManager,
+  loadingScreen: loadingScreen,
 });
 
 // Initialize input manager (handles keyboard, mouse, and gamepad)
@@ -255,7 +266,8 @@ window.inputManager = inputManager;
 const cameraAnimationManager = new CameraAnimationManager(
   camera,
   characterController,
-  gameManager
+  gameManager,
+  { loadingScreen: loadingScreen }
 );
 
 // Load camera animations from data
@@ -271,9 +283,17 @@ window.cameraAnimationManager = cameraAnimationManager;
 const uiManager = new UIManager(gameManager);
 
 // Initialize music manager and load tracks from musicData
-const musicManager = new MusicManager({ defaultVolume: 0.6 });
+const musicManager = new MusicManager({
+  defaultVolume: 0.6,
+  loadingScreen: loadingScreen,
+});
+
+// Load only preload tracks during loading screen
 Object.values(musicTracks).forEach((track) => {
-  musicManager.addTrack(track.id, track.path);
+  musicManager.addTrack(track.id, track.path, {
+    preload: track.preload,
+    loop: track.loop !== undefined ? track.loop : true,
+  });
 });
 
 // Initialize start screen only if we're in START_SCREEN state
@@ -329,7 +349,12 @@ const dialogManager = new DialogManager({
   sfxManager: sfxManager, // Link to SFX manager for volume control
   gameManager: gameManager, // Link to game manager for state updates
   dialogChoiceUI: dialogChoiceUI, // Link to dialog choice UI
+  loadingScreen: loadingScreen, // For progress tracking
 });
+
+// Preload dialog audio files
+import { dialogTracks } from "./dialogData.js";
+dialogManager.preloadDialogs(dialogTracks);
 
 // Link dialog manager to choice UI
 dialogChoiceUI.dialogManager = dialogManager;
@@ -364,6 +389,7 @@ await gameManager.initialize({
   scene: scene,
   camera: camera,
 });
+loadingScreen.completeTask("initialization");
 
 // Set up event listeners for managers
 characterController.setGameManager(gameManager);
@@ -431,6 +457,26 @@ gizmoManager.setIntegration(uiManager?.components?.idleHelper, inputManager);
 // Allow InputManager to detect gizmo hover/drag to enable drag-to-look when not over gizmo
 if (typeof inputManager.setGizmoProbe === "function") {
   inputManager.setGizmoProbe(() => gizmoManager.isPointerOverGizmo());
+}
+
+// Hide loading screen and show renderer
+if (loadingScreen.isLoadingComplete()) {
+  loadingScreen.hide(0.5);
+  // Fade in renderer
+  renderer.domElement.style.transition = "opacity 0.5s ease-in";
+  setTimeout(() => {
+    renderer.domElement.style.opacity = "1";
+  }, 100);
+
+  // Load deferred assets after loading screen hides
+  setTimeout(() => {
+    console.log("Loading deferred assets...");
+    musicManager.loadDeferredTracks();
+    sfxManager.loadDeferredSounds();
+    dialogManager.loadDeferredDialogs();
+    cameraAnimationManager.loadDeferredAnimations();
+    // TODO: Load deferred videos (if needed)
+  }, 600); // Start loading after fade completes
 }
 
 let lastTime;

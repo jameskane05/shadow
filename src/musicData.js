@@ -6,6 +6,7 @@
  * Each track contains:
  * - id: Unique identifier
  * - path: Path to the audio file
+ * - preload: If true, load during loading screen; if false, load after (default: false)
  * - description: Human-readable description
  * - criteria: Optional object with key-value pairs that must match game state
  *   - Simple equality: { currentState: GAME_STATES.START_SCREEN }
@@ -28,6 +29,7 @@ export const musicTracks = {
     id: "rach2",
     path: "./audio/music/rach 3 - mv 2 - 1-00.mp3",
     description: "Rachmaninoff 3 - Movement 2 (1:00) - Intro sequence",
+    preload: true, // Load before showing game
     criteria: {
       currentState: GAME_STATES.START_SCREEN,
     },
@@ -38,7 +40,8 @@ export const musicTracks = {
     id: "rachDriveBy",
     path: "./audio/music/rach 3 - mv 2 - 4-30.mp3",
     description: "Rachmaninoff 3 - Movement 2 (4:30) - Drive-by sequence",
-    criteria: { currentState: GAME_STATES.DRIVE_BY },
+    preload: false, // Load after loading screen
+    criteria: { currentState: { $gte: GAME_STATES.DRIVE_BY } },
     fadeTime: 1.0,
     priority: 90,
   },
@@ -46,9 +49,13 @@ export const musicTracks = {
     id: "rach1",
     path: "./audio/music/rach 3 - mv 1 - 0-40.mp3",
     description: "Rachmaninoff 3 - Movement 1 (0:00-0:40) - Main gameplay",
-    // Play when currentState progresses beyond START_SCREEN
+    preload: true, // Load before showing game
+    // Play when currentState progresses beyond START_SCREEN but before DRIVE_BY
     criteria: {
-      currentState: { $gt: GAME_STATES.START_SCREEN },
+      currentState: {
+        $gt: GAME_STATES.START_SCREEN,
+        $lt: GAME_STATES.DRIVE_BY,
+      },
     },
     fadeTime: 0.25,
     priority: 10,

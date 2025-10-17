@@ -19,6 +19,7 @@
  *
  * For type "animation" or "jsonAnimation":
  * - path: Path to the animation JSON file
+ * - preload: If true, load during loading screen; if false, load after (default: false)
  * - syncController: If true, sync character controller yaw/pitch to final camera pose (default: true)
  * - restoreInput: If true, restore input controls when complete (default: true)
  * - scaleY: Optional Y-axis scale multiplier for animation (default: 1.0)
@@ -31,6 +32,8 @@
  * - returnToOriginalView: If true, return to original view before restoring control (default: false)
  * - returnTransitionTime: Time for the return transition in seconds (default: same as transitionTime)
  *   Note: Only used if returnToOriginalView is true. Can be different from initial transition.
+ * - restoreInput: If true, restore input controls when complete (default: true)
+ *   - If false, inputs remain disabled after animation - you must manually re-enable them
  * - enableZoom: If true, enable zoom/DoF effect (default: false)
  * - zoomOptions: Optional zoom configuration
  *   - zoomFactor: Camera zoom multiplier (e.g., 2.0 for 2x zoom)
@@ -44,8 +47,9 @@
  * - onComplete: Optional callback when lookat completes. Receives gameManager as parameter.
  *   Example: onComplete: (gameManager) => { gameManager.setState({...}); }
  *
- * Input control: Always disabled during lookat. Restored when complete, or if zoom is enabled without
- *                returnToOriginalView, restored after holdDuration + transitionDuration.
+ * Input control: Always disabled during lookat. By default, restored when complete (or if zoom is enabled
+ *                without returnToOriginalView, after holdDuration + transitionDuration). Set restoreInput
+ *                to false to keep inputs disabled after animation completes.
  *
  * For type "moveTo":
  * - position: {x, y, z} world position to move character to
@@ -74,6 +78,78 @@ import { videos } from "./videoData.js";
 import { sceneObjects } from "./sceneData.js";
 
 export const cameraAnimations = {
+  catLookat: {
+    id: "catLookat",
+    type: "lookat",
+    description: "Look at cat video when player hears cat sound",
+    position: videos.cat.position,
+    transitionTime: 0.75,
+    returnToOriginalView: true,
+    returnTransitionTime: 1.25,
+    enableZoom: true,
+    zoomOptions: {
+      zoomFactor: 1.8,
+      minAperture: 0.15,
+      maxAperture: 0.35,
+      transitionStart: 0.7,
+      transitionDuration: 2.0,
+      holdDuration: 3.25,
+    },
+    criteria: { heardCat: true },
+    playOnce: true,
+    priority: 100,
+    onComplete: (gameManager) => {
+      gameManager.setState({ currentState: GAME_STATES.CAT_DIALOG_CHOICE });
+    },
+  },
+
+  radioLookat: {
+    id: "radioLookat",
+    type: "lookat",
+    description: "Look at radio when player approaches it",
+    position: {
+      x: sceneObjects.radio.position.x,
+      y: sceneObjects.radio.position.y + 0.5,
+      z: sceneObjects.radio.position.z,
+    },
+    transitionTime: 0.75,
+    returnToOriginalView: true,
+    returnTransitionTime: 1.0,
+    enableZoom: true,
+    zoomOptions: {
+      zoomFactor: 1.5, // Subtle zoom
+      minAperture: 0.2,
+      maxAperture: 0.35,
+      transitionStart: 0.6,
+      transitionDuration: 1.5,
+      holdDuration: 2.0,
+    },
+    criteria: { currentState: GAME_STATES.NEAR_RADIO },
+    playOnce: true,
+    priority: 100,
+  },
+
+  shadowGlimpseLookat: {
+    id: "shadowGlimpseLookat",
+    type: "lookat",
+    description: "Look at shadow glimpse video when player enters trigger",
+    position: videos.shadowGlimpse.position,
+    transitionTime: 0.6,
+    returnToOriginalView: false,
+    enableZoom: true,
+    zoomOptions: {
+      zoomFactor: 1.5,
+      minAperture: 0.2,
+      maxAperture: 0.35,
+      transitionStart: 0.6,
+      transitionDuration: 1.5,
+      holdDuration: 2.0,
+    },
+    criteria: { shadowGlimpse: true },
+    playOnce: true,
+    priority: 100,
+  },
+
   phoneBoothLookat: {
     id: "phoneBoothLookat",
     type: "lookat",
@@ -120,32 +196,6 @@ export const cameraAnimations = {
     criteria: { currentState: GAME_STATES.ANSWERED_PHONE },
     priority: 100,
     playOnce: true,
-    // Note: Movement stays disabled until manually restored (e.g., after phone interaction)
-  },
-
-  catLookat: {
-    id: "catLookat",
-    type: "lookat",
-    description: "Look at cat video when player hears cat sound",
-    position: videos.cat.position,
-    transitionTime: 0.75,
-    returnToOriginalView: true,
-    returnTransitionTime: 1.25,
-    enableZoom: true,
-    zoomOptions: {
-      zoomFactor: 1.8,
-      minAperture: 0.15,
-      maxAperture: 0.35,
-      transitionStart: 0.7,
-      transitionDuration: 2.0,
-      holdDuration: 3.25,
-    },
-    criteria: { heardCat: true },
-    playOnce: true,
-    priority: 100,
-    onComplete: (gameManager) => {
-      gameManager.setState({ currentState: GAME_STATES.CAT_DIALOG_CHOICE });
-    },
   },
 
   carLookat: {
@@ -164,10 +214,7 @@ export const cameraAnimations = {
       holdDuration: 2.0, // Hold the zoom longer for dramatic effect
     },
     criteria: { currentState: GAME_STATES.DRIVE_BY_PREAMBLE },
-    inputControl: {
-      disableMovement: true, // Disable movement
-      disableRotation: true, // Allow rotation (player can look around)
-    },
+    restoreInput: false,
     priority: 100,
     playOnce: true,
     delay: 0, // Wait 0.5 seconds before looking at phone booth
@@ -185,6 +232,9 @@ export const cameraAnimations = {
     restoreInput: true,
     delay: 1.5, // Wait 2 seconds after DRIVE_BY state before animation
     scaleY: 0.8, // Optional: reduce vertical motion by 20%
+    onComplete: (gameManager) => {
+      gameManager.setState({ currentState: GAME_STATES.POST_DRIVE_BY });
+    },
   },
 
   shoulderTap: {

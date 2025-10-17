@@ -13,10 +13,11 @@ import { getCameraAnimationsForState } from "./cameraAnimationData.js";
  * - Configurable input restoration
  */
 class CameraAnimationManager {
-  constructor(camera, characterController, gameManager) {
+  constructor(camera, characterController, gameManager, options = {}) {
     this.camera = camera;
     this.characterController = characterController;
     this.gameManager = gameManager;
+    this.loadingScreen = options.loadingScreen || null; // For progress tracking
 
     // Playback state
     this.isPlaying = false;
@@ -25,7 +26,7 @@ class CameraAnimationManager {
     this.elapsed = 0;
     this.frameIdx = 1;
     this.onComplete = null;
-    this.scaleY = 1.0; // Y-axis scale for current animation
+    this.scaleY = 0.8; // Y-axis scale for current animation
 
     // Pre-animation slerp state (to reset pitch to 0 while keeping yaw)
     this.isPreSlerping = false;
@@ -33,6 +34,9 @@ class CameraAnimationManager {
     this.preSlerpTargetQuat = new THREE.Quaternion(); // Will be set to zero pitch + current yaw
     this.preSlerpElapsed = 0;
     this.preSlerpDuration = 0.3; // 300ms quick slerp to level horizon
+
+    // Deferred animation loading
+    this.deferredAnimations = new Map(); // Map of animId -> { id, path, data }
 
     // Base pose (where animation starts from)
     this.baseQuat = new THREE.Quaternion();
@@ -124,15 +128,49 @@ class CameraAnimationManager {
         (anim.type === "jsonAnimation" || anim.type === "animation") &&
         anim.path
     );
-    const loadPromises = animationsToLoad.map((anim) =>
-      this.loadAnimation(anim.id, anim.path)
+
+    // Separate preload and deferred animations
+    const preloadAnimations = [];
+    const deferredAnimations = [];
+
+    for (const anim of animationsToLoad) {
+      const preload = anim.preload !== false; // Default to true
+      if (preload) {
+        preloadAnimations.push(anim);
+      } else {
+        deferredAnimations.push(anim);
+        this.deferredAnimations.set(anim.id, anim);
+        console.log(
+          `CameraAnimationManager: Deferred loading for animation "${anim.id}"`
+        );
+      }
+    }
+
+    // Load only preload animations during loading screen
+    const loadPromises = preloadAnimations.map(
+      (anim) => this.loadAnimation(anim.id, anim.path, true) // Pass preload flag
     );
     await Promise.all(loadPromises);
 
     const nonJsonCount = animations.length - animationsToLoad.length;
     console.log(
-      `CameraAnimationManager: Loaded ${animationsToLoad.length} JSON animations from data (${nonJsonCount} lookats/moveTos)`
+      `CameraAnimationManager: Loaded ${preloadAnimations.length} JSON animations from data (${deferredAnimations.length} deferred, ${nonJsonCount} lookats/moveTos)`
     );
+  }
+
+  /**
+   * Load deferred animations (called after loading screen)
+   */
+  async loadDeferredAnimations() {
+    console.log(
+      `CameraAnimationManager: Loading ${this.deferredAnimations.size} deferred animations`
+    );
+    const loadPromises = [];
+    for (const [id, anim] of this.deferredAnimations) {
+      loadPromises.push(this.loadAnimation(id, anim.path, false));
+    }
+    await Promise.all(loadPromises);
+    this.deferredAnimations.clear();
   }
 
   /**
@@ -383,12 +421,14 @@ class CameraAnimationManager {
       lookAtData.returnDuration ||
       transitionTime;
 
-    // Determine if we need to delay input restoration after zoom completes
-    // This happens when: zoom is enabled, returnToOriginalView is false
+    // Check if input should be restored (default: true for backwards compatibility)
+    const shouldRestoreInput =
+      lookAtData.restoreInput !== undefined ? lookAtData.restoreInput : true;
+
+    // Determine if we need to delay input restoration after zoom/DoF completes
+    // This happens when: zoom is enabled AND restoreInput is true
     const needsDelayedRestore =
-      lookAtData.enableZoom &&
-      !lookAtData.returnToOriginalView &&
-      lookAtData.zoomOptions;
+      shouldRestoreInput && lookAtData.enableZoom && lookAtData.zoomOptions;
 
     // Store user-defined onComplete callback
     const userOnComplete = lookAtData.onComplete;
@@ -399,15 +439,30 @@ class CameraAnimationManager {
       const zoomOpts = lookAtData.zoomOptions;
       const holdDuration = zoomOpts.holdDuration || 0;
       const zoomTransitionDuration = zoomOpts.transitionDuration || 0;
-      const delayAfterLookat = holdDuration + zoomTransitionDuration;
 
-      console.log(
-        `CameraAnimationManager: Lookat '${lookAtData.id}' has zoom without return. ` +
-          `Will restore control ${delayAfterLookat.toFixed(
-            2
-          )}s after lookat completes ` +
-          `(hold: ${holdDuration}s + zoom-out: ${zoomTransitionDuration}s)`
-      );
+      let delayAfterLookat;
+      if (lookAtData.returnToOriginalView) {
+        // When returning to original view, zoom/DoF resets during the return animation
+        // So we need to wait for the return animation to complete
+        delayAfterLookat = returnTransitionTime;
+        console.log(
+          `CameraAnimationManager: Lookat '${lookAtData.id}' has zoom with return. ` +
+            `Will restore control ${delayAfterLookat.toFixed(
+              2
+            )}s after lookat completes ` +
+            `(return transition: ${returnTransitionTime}s)`
+        );
+      } else {
+        // When not returning to original view, wait for zoom hold + zoom-out transition
+        delayAfterLookat = holdDuration + zoomTransitionDuration;
+        console.log(
+          `CameraAnimationManager: Lookat '${lookAtData.id}' has zoom without return. ` +
+            `Will restore control ${delayAfterLookat.toFixed(
+              2
+            )}s after lookat completes ` +
+            `(hold: ${holdDuration}s + zoom-out: ${zoomTransitionDuration}s)`
+        );
+      }
 
       // Provide onComplete that schedules delayed restoration and calls user callback
       onComplete = () => {
@@ -420,8 +475,8 @@ class CameraAnimationManager {
           userOnComplete(this.gameManager);
         }
       };
-    } else {
-      // Immediate restoration when lookat completes
+    } else if (shouldRestoreInput) {
+      // Immediate restoration when lookat completes (only if restoreInput is true and no zoom)
       onComplete = () => {
         if (this.characterController) {
           this.characterController.enableInput();
@@ -429,6 +484,17 @@ class CameraAnimationManager {
             `CameraAnimationManager: Lookat '${lookAtData.id}' complete, input restored`
           );
         }
+        // Call user-defined callback if provided
+        if (userOnComplete) {
+          userOnComplete(this.gameManager);
+        }
+      };
+    } else {
+      // Don't restore input - just call user callback if provided
+      onComplete = () => {
+        console.log(
+          `CameraAnimationManager: Lookat '${lookAtData.id}' complete, input NOT restored (manual restoration required)`
+        );
         // Call user-defined callback if provided
         if (userOnComplete) {
           userOnComplete(this.gameManager);
@@ -496,9 +562,15 @@ class CameraAnimationManager {
    * Load an animation from JSON
    * @param {string} name - Animation identifier
    * @param {string} url - Path to JSON file
+   * @param {boolean} isPreload - Whether this is a preload (for loading screen tracking)
    * @returns {Promise<boolean>} Success
    */
-  async loadAnimation(name, url) {
+  async loadAnimation(name, url, isPreload = false) {
+    // Register with loading screen if preloading
+    if (this.loadingScreen && isPreload) {
+      this.loadingScreen.registerTask(`camera_anim_${name}`, 1);
+    }
+
     try {
       let src = url || "";
       if (!/^(\/|https?:)/i.test(src)) {
@@ -510,6 +582,9 @@ class CameraAnimationManager {
       const raw = Array.isArray(data.frames) ? data.frames : [];
       if (raw.length === 0) {
         console.warn(`CameraAnimationManager: No frames in '${src}'`);
+        if (this.loadingScreen && isPreload) {
+          this.loadingScreen.completeTask(`camera_anim_${name}`);
+        }
         return false;
       }
 
@@ -544,9 +619,19 @@ class CameraAnimationManager {
           frames.length
         } frames, ${duration.toFixed(2)}s)`
       );
+
+      // Mark as complete in loading screen if preloading
+      if (this.loadingScreen && isPreload) {
+        this.loadingScreen.completeTask(`camera_anim_${name}`);
+      }
+
       return true;
     } catch (e) {
       console.warn(`CameraAnimationManager: Failed to load '${name}':`, e);
+      // Mark as complete even on error so loading screen can proceed
+      if (this.loadingScreen && isPreload) {
+        this.loadingScreen.completeTask(`camera_anim_${name}`);
+      }
       return false;
     }
   }

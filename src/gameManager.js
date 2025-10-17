@@ -170,6 +170,11 @@ class GameManager {
 
     this.emit("state:changed", this.state, oldState);
 
+    // Update scene objects based on new state (load new objects if needed)
+    if (this.sceneManager && newState.currentState !== oldState.currentState) {
+      this.updateSceneForState();
+    }
+
     // Update scene animations based on new state
     if (this.sceneManager) {
       this.sceneManager.updateAnimationsForState(this.state);

@@ -237,6 +237,7 @@ class VideoManager {
         loop: videoConfig.loop,
         muted: videoConfig.muted,
         volume: videoConfig.volume,
+        playbackRate: videoConfig.playbackRate,
         spatialAudio: videoConfig.spatialAudio,
         audioPositionOffset: videoConfig.audioPositionOffset,
         pannerAttr: videoConfig.pannerAttr,
@@ -372,6 +373,8 @@ class VideoPlayer {
       loop: options.loop !== undefined ? options.loop : false,
       muted: options.muted !== undefined ? options.muted : true,
       volume: options.volume !== undefined ? options.volume : 1.0,
+      playbackRate:
+        options.playbackRate !== undefined ? options.playbackRate : 1.0,
       spatialAudio: options.spatialAudio || false,
       audioPositionOffset: options.audioPositionOffset || { x: 0, y: 0, z: 0 },
       pannerAttr: options.pannerAttr || {
@@ -415,6 +418,7 @@ class VideoPlayer {
     this.video.loop = this.config.loop;
     this.video.playsInline = true;
     this.video.preload = "auto";
+    this.video.playbackRate = this.config.playbackRate;
 
     // Set up spatial audio if enabled
     if (this.config.spatialAudio && !this.config.muted) {

@@ -1223,6 +1223,26 @@ class CharacterController {
   }
 
   /**
+   * Check if a given position is visible in the camera frustum
+   * @param {THREE.Vector3} position - World position to check
+   * @returns {boolean} True if position is visible in camera frustum
+   */
+  isPositionInFrustum(position) {
+    // Create frustum from camera's projection and view matrices
+    const frustum = new THREE.Frustum();
+    const projectionMatrix = this.camera.projectionMatrix;
+    const viewMatrix = this.camera.matrixWorldInverse;
+
+    // Combine matrices to get the frustum
+    const matrix = new THREE.Matrix4();
+    matrix.multiplyMatrices(projectionMatrix, viewMatrix);
+    frustum.setFromProjectionMatrix(matrix);
+
+    // Check if position is in frustum
+    return frustum.containsPoint(position);
+  }
+
+  /**
    * Set DoF enabled state (called by options menu)
    * @param {boolean} enabled - Whether DoF is enabled
    */
@@ -1794,7 +1814,7 @@ class CharacterController {
       }
     }
 
-    if (!this.isLookingAt) {
+    if (!this.isLookingAt && !this.inputDisabled) {
       // Normal camera control
       // Get camera input from input manager
       const cameraInput = this.inputManager.getCameraInput(dt);

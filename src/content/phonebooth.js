@@ -23,7 +23,10 @@ class PhoneBooth {
 
     // Receiver animation state
     this.receiverLerp = null;
+    this.receiverDropLerp = null; // Lerp for dropping animation
     this.receiver = null;
+    this.receiverOriginalWorldPos = null; // Original world position on load
+    this.receiverOriginalWorldRot = null; // Original world rotation on load
     this.cordAttach = null;
     this.receiverPositionLocked = false;
     this.lockedReceiverPos = null;
@@ -46,12 +49,13 @@ class PhoneBooth {
 
       // Cord configuration
       cordSegments: 12, // Number of links in the chain
-      cordSegmentLength: 0.12, // Length of each segment (longer for slack)
+      cordSegmentLength: 0.05, // Length of each segment (longer for slack)
       cordSegmentRadius: 0.002, // Radius of each segment (very slender)
-      cordMass: 10, // Mass of each segment (lighter for natural droop)
-      cordDamping: 1.5, // Linear damping
-      cordAngularDamping: 1.5, // Angular damping
+      cordMass: 0.002, // Mass of each segment (lighter for natural droop)
+      cordDamping: 8.0, // Linear damping (high to prevent wild movement)
+      cordAngularDamping: 8.0, // Angular damping (high to prevent spinning)
       cordDroopAmount: 2, // How much the cord droops in the middle (0 = straight, 1+ = more droop)
+      cordRigidSegments: 1, // Number of initial segments that use fixed joints (rigid at phone booth end)
 
       // Collision groups: 0x00040002
       // - Belongs to group 2 (0x0002) - Phone cord/receiver
@@ -128,6 +132,30 @@ class PhoneBooth {
     );
     this.receiver = this.sceneManager.findChildByName("phonebooth", "Receiver");
 
+    // Store receiver's original world position and rotation for drop animation
+    if (this.receiver) {
+      this.receiverOriginalWorldPos = new THREE.Vector3();
+      this.receiverOriginalWorldRot = new THREE.Quaternion();
+      this.receiver.getWorldPosition(this.receiverOriginalWorldPos);
+      this.receiver.getWorldQuaternion(this.receiverOriginalWorldRot);
+      console.log(
+        "PhoneBooth: Stored receiver original position:",
+        this.receiverOriginalWorldPos.toArray()
+      );
+
+      // If starting in DRIVE_BY or later, position receiver in dropped state
+      if (
+        this.gameManager &&
+        this.gameManager.state &&
+        this.gameManager.state.currentState >= GAME_STATES.DRIVE_BY
+      ) {
+        console.log(
+          "PhoneBooth: Starting in DRIVE_BY or later state, positioning receiver in dropped state"
+        );
+        this.initializeReceiverInDroppedState();
+      }
+    }
+
     if (this.cordAttach && this.receiver && this.physicsManager) {
       // Create the phone cord chain
       this.createPhoneCord();
@@ -180,30 +208,71 @@ class PhoneBooth {
       slackFactor.toFixed(2),
       "(>1 means cord will droop)"
     );
+    console.log(
+      "  CordAttach position (phone booth):",
+      cordAttachPos.toArray()
+    );
+    console.log("  Receiver position:", receiverPos.toArray());
+    console.log(
+      "  Rigid segments:",
+      this.config.cordRigidSegments,
+      "at PHONE BOOTH end"
+    );
 
     // Create cord segments with initial droop/curve
     for (let i = 0; i < this.config.cordSegments; i++) {
-      // Calculate position along the cord with a catenary-like curve for natural droop
-      const t = (i + 0.5) / this.config.cordSegments;
+      let pos = new THREE.Vector3();
 
-      // Base position along straight line
-      const pos = new THREE.Vector3().lerpVectors(
-        cordAttachPos,
-        receiverPos,
-        t
-      );
+      // For the FIRST rigid segments (at phone booth), position them to stick out with smooth curve
+      if (i < this.config.cordRigidSegments) {
+        // Stick out from phone booth with gradual downward curve
+        const rigidStep = (i + 1) / this.config.cordRigidSegments;
+        pos.copy(cordAttachPos);
+        // Extend horizontally outward from phone booth (positive X = right)
+        pos.x += rigidStep * segmentLength * this.config.cordRigidSegments; // Extend right
+        // Add smooth downward curve (quadratic easing)
+        const curveFactor = rigidStep * rigidStep; // Accelerating curve downward
+        pos.y -= curveFactor * segmentLength * 2; // Gradual drop
+        console.log(`  Segment ${i} (RIGID): position`, pos.toArray());
+      } else {
+        // For flexible segments, calculate position from end of rigid section to receiver
+        const flexibleSegmentIndex = i - this.config.cordRigidSegments;
+        const totalFlexibleSegments =
+          this.config.cordSegments - this.config.cordRigidSegments;
+        const flexT = (flexibleSegmentIndex + 0.5) / totalFlexibleSegments;
 
-      // Add vertical droop in the middle (parabolic curve)
-      // Maximum droop at t=0.5 (middle of cord)
-      const droopCurve = Math.sin(t * Math.PI); // 0 at ends, 1 at middle
-      const droopOffset = droopCurve * this.config.cordDroopAmount;
-      pos.y -= droopOffset; // Pull down by droop amount
+        // Start position is end of rigid section (with curve)
+        const rigidEndPos = new THREE.Vector3().copy(cordAttachPos);
+        rigidEndPos.x += segmentLength * this.config.cordRigidSegments; // Full horizontal extension
+        rigidEndPos.y -= segmentLength * 2; // Match the curve drop at the end
+
+        // Lerp from end of rigid section to receiver
+        pos.lerpVectors(rigidEndPos, receiverPos, flexT);
+
+        // Add vertical droop in the middle (parabolic curve) for natural hanging
+        // Maximum droop at flexT=0.5 (middle of flexible cord)
+        const droopCurve = Math.sin(flexT * Math.PI); // 0 at ends, 1 at middle
+        const droopOffset = droopCurve * this.config.cordDroopAmount;
+        pos.y -= droopOffset; // Pull down by droop amount
+      }
 
       // Create rigid body for this segment
-      const rigidBodyDesc = RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(pos.x, pos.y, pos.z)
-        .setLinearDamping(this.config.cordDamping)
-        .setAngularDamping(this.config.cordAngularDamping);
+      // For rigid segments at phone booth, make them KINEMATIC (unaffected by gravity)
+      let rigidBodyDesc;
+      if (i < this.config.cordRigidSegments) {
+        rigidBodyDesc =
+          RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(
+            pos.x,
+            pos.y,
+            pos.z
+          );
+        console.log(`  Segment ${i} is KINEMATIC (won't fall)`);
+      } else {
+        rigidBodyDesc = RAPIER.RigidBodyDesc.dynamic()
+          .setTranslation(pos.x, pos.y, pos.z)
+          .setLinearDamping(this.config.cordDamping)
+          .setAngularDamping(this.config.cordAngularDamping);
+      }
 
       const rigidBody = world.createRigidBody(rigidBodyDesc);
 
@@ -222,7 +291,7 @@ class PhoneBooth {
       // Create joint to previous segment or anchor point
       let joint = null;
       if (i === 0) {
-        // First segment - attach to CordAttach with a fixed anchor
+        // First segment - attach to CordAttach with a FIXED joint (rigid at phone booth)
         // We'll create a "virtual" kinematic body at the cord attach point
         const anchorBodyDesc =
           RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(
@@ -230,9 +299,22 @@ class PhoneBooth {
             cordAttachPos.y,
             cordAttachPos.z
           );
+
+        // Rotate anchor body to point horizontally right (same as rigid segments)
+        const anchorRotation = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(0, 0, 1),
+          -Math.PI / 2 // -90 degrees (pointing right)
+        );
+        anchorBodyDesc.setRotation({
+          x: anchorRotation.x,
+          y: anchorRotation.y,
+          z: anchorRotation.z,
+          w: anchorRotation.w,
+        });
+
         const anchorBody = world.createRigidBody(anchorBodyDesc);
 
-        // Create FIXED joint for first segment (rigid connection, sticks out from phone)
+        // Create FIXED joint for first segment (kinematic segments don't need special joint config)
         const params = RAPIER.JointData.fixed(
           { x: 0, y: 0, z: 0 }, // Anchor on the fixed point
           { w: 1.0, x: 0, y: 0, z: 0 }, // Rotation at anchor
@@ -249,15 +331,15 @@ class PhoneBooth {
           joint: null,
           isAnchor: true,
         });
-      } else if (i === 1) {
-        // Second segment - connect to first (rigid) segment with rope joint
-        // This is where the flexible part starts
+      } else if (i < this.config.cordRigidSegments) {
+        // First N segments after anchor - use FIXED joints (kinematic segments stay in place)
         const prevLink = this.cordLinks[this.cordLinks.length - 1];
 
-        const params = RAPIER.JointData.rope(
-          segmentLength * 1.2, // Max length (20% longer than segment for slack)
-          { x: 0, y: 0, z: 0 }, // Center of previous segment
-          { x: 0, y: 0, z: 0 } // Center of current segment
+        const params = RAPIER.JointData.fixed(
+          { x: 0, y: 0, z: 0 }, // Anchor on previous segment
+          { w: 1.0, x: 0, y: 0, z: 0 }, // Rotation at previous
+          { x: 0, y: 0, z: 0 }, // Anchor on current segment
+          { w: 1.0, x: 0, y: 0, z: 0 } // Rotation at current
         );
 
         joint = world.createImpulseJoint(
@@ -267,12 +349,12 @@ class PhoneBooth {
           true
         );
       } else {
-        // Connect remaining segments with rope joints
+        // Remaining segments - use rope joints (strict max length)
         const prevLink = this.cordLinks[this.cordLinks.length - 1];
 
-        // Use a rope joint (distance constraint with max length only)
+        // Use a rope joint with very tight max length (only 5% slack)
         const params = RAPIER.JointData.rope(
-          segmentLength * 1.2, // Max length (20% longer than segment for slack)
+          segmentLength * 1.05, // Max length (only 5% slack)
           { x: 0, y: 0, z: 0 }, // Center of previous segment
           { x: 0, y: 0, z: 0 } // Center of current segment
         );
@@ -302,10 +384,10 @@ class PhoneBooth {
       );
     this.receiverAnchor = world.createRigidBody(receiverAnchorDesc);
 
-    // Attach last segment to receiver anchor with rope joint
+    // Attach last segment to receiver anchor with rope joint (flexible at receiver)
     const lastLink = this.cordLinks[this.cordLinks.length - 1];
     const lastJointParams = RAPIER.JointData.rope(
-      segmentLength * 1.2, // Max length (20% longer for slack)
+      segmentLength * 1.05, // Max length (only 5% slack)
       { x: 0, y: 0, z: 0 }, // Last segment center
       { x: 0, y: 0, z: 0 } // Receiver anchor center
     );
@@ -540,6 +622,99 @@ class PhoneBooth {
   }
 
   /**
+   * Start the receiver drop animation
+   * Moves receiver to hang below the rigid cord section
+   */
+  startReceiverDropLerp() {
+    if (
+      !this.receiver ||
+      !this.receiverOriginalWorldPos ||
+      !this.receiverOriginalWorldRot ||
+      !this.cordAttach
+    ) {
+      console.warn(
+        "PhoneBooth: Cannot start drop lerp - no receiver or original position"
+      );
+      return;
+    }
+
+    // Current state (where the receiver is now in world space, detached from camera)
+    const startPos = this.receiver.position.clone();
+    const startQuat = this.receiver.quaternion.clone();
+
+    // Target: Below the end of the rigid cord section
+    const cordAttachPos = new THREE.Vector3();
+    this.cordAttach.getWorldPosition(cordAttachPos);
+
+    const targetPos = cordAttachPos.clone();
+    // Position at end of rigid section
+    targetPos.x +=
+      this.config.cordSegmentLength * this.config.cordRigidSegments;
+    targetPos.y -= this.config.cordSegmentLength * 2; // Match curve
+    targetPos.y -= 0.3; // Hang below the rigid section
+
+    // Flip the original rotation upside down (180 degrees on X axis)
+    const targetQuat = this.receiverOriginalWorldRot.clone();
+    const flipRotation = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(1, 0, 0),
+      Math.PI // 180 degrees
+    );
+    targetQuat.multiply(flipRotation);
+
+    this.receiverDropLerp = {
+      object: this.receiver,
+      startPos: startPos,
+      targetPos: targetPos,
+      startQuat: startQuat,
+      targetQuat: targetQuat,
+      duration: 0.8, // 0.8 seconds for the drop
+      elapsed: 0,
+    };
+
+    console.log(
+      "PhoneBooth: Starting receiver drop animation (below rigid cord section)"
+    );
+    console.log("  Target position:", targetPos.toArray());
+  }
+
+  /**
+   * Update receiver drop lerp animation
+   * @param {number} dt - Delta time in seconds
+   */
+  updateReceiverDropLerp(dt) {
+    if (!this.receiverDropLerp) return;
+
+    this.receiverDropLerp.elapsed += dt;
+    const t = Math.min(
+      1,
+      this.receiverDropLerp.elapsed / this.receiverDropLerp.duration
+    );
+
+    // Apply easing (cubic ease-in for falling motion)
+    const eased = t * t * t;
+
+    // Lerp position
+    this.receiverDropLerp.object.position.lerpVectors(
+      this.receiverDropLerp.startPos,
+      this.receiverDropLerp.targetPos,
+      eased
+    );
+
+    // Lerp rotation (using quaternion slerp for smooth interpolation)
+    this.receiverDropLerp.object.quaternion.slerpQuaternions(
+      this.receiverDropLerp.startQuat,
+      this.receiverDropLerp.targetQuat,
+      eased
+    );
+
+    // Complete animation
+    if (t >= 1) {
+      console.log("PhoneBooth: Receiver drop animation complete");
+      this.receiverDropLerp = null;
+    }
+  }
+
+  /**
    * Drop the receiver with physics
    * Detaches from camera and adds a dynamic rigid body so it falls and hangs by the cord
    */
@@ -551,7 +726,7 @@ class PhoneBooth {
       return;
     }
 
-    console.log("PhoneBooth: Dropping receiver with physics");
+    console.log("PhoneBooth: Detaching receiver from camera (no physics)");
 
     // Unlock position so we can move it
     this.receiverPositionLocked = false;
@@ -586,93 +761,8 @@ class PhoneBooth {
       this.receiver.position.toArray()
     );
 
-    // Get RAPIER physics world
-    const world = this.physicsManager.world;
-    if (!world) {
-      console.error("PhoneBooth: Physics world not available");
-      return;
-    }
-
-    // Import RAPIER from physics manager
-    const RAPIER = this.physicsManager.RAPIER;
-
-    // Get updated world position after reparenting (in case attach changed local coords)
-    this.receiver.getWorldPosition(worldPos);
-    this.receiver.getWorldQuaternion(worldQuat);
-
-    // Create a dynamic rigid body for the receiver
-    const receiverBodyDesc = RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(worldPos.x, worldPos.y, worldPos.z)
-      .setRotation({
-        w: worldQuat.w,
-        x: worldQuat.x,
-        y: worldQuat.y,
-        z: worldQuat.z,
-      })
-      .setLinearDamping(this.config.receiverDamping)
-      .setAngularDamping(this.config.receiverAngularDamping);
-
-    this.receiverRigidBody = world.createRigidBody(receiverBodyDesc);
-
-    // Create cylindrical collider (Y-axis aligned by default)
-    const colliderDesc = RAPIER.ColliderDesc.cylinder(
-      this.config.receiverColliderHeight / 2, // Half-height
-      this.config.receiverColliderRadius
-    )
-      .setMass(this.config.receiverMass)
-      .setCollisionGroups(this.config.cordCollisionGroup);
-
-    this.receiverCollider = world.createCollider(
-      colliderDesc,
-      this.receiverRigidBody
-    );
-
-    console.log(
-      `PhoneBooth: Created receiver rigid body with cylinder collider (h=${this.config.receiverColliderHeight}m, r=${this.config.receiverColliderRadius}m, mass=${this.config.receiverMass}kg)`
-    );
-
-    // Find the last joint connecting to the receiver anchor
-    const lastLinkIndex = this.cordLinks.findIndex(
-      (link) => link.rigidBody === this.receiverAnchor
-    );
-
-    if (lastLinkIndex > 0) {
-      // Get the second-to-last link (the last cord segment before the anchor)
-      const secondToLastLink = this.cordLinks[lastLinkIndex - 1];
-
-      // Remove old joint to the kinematic anchor (if it exists)
-      if (secondToLastLink.joint) {
-        world.removeImpulseJoint(secondToLastLink.joint, true);
-        secondToLastLink.joint = null;
-      }
-
-      // Create new rope joint connecting last cord segment to receiver rigid body
-      const jointParams = RAPIER.JointData.rope(
-        this.config.cordSegmentLength * 1.2, // Max length with slack
-        { x: 0, y: 0, z: 0 }, // Anchor on cord segment
-        { x: 0, y: 0, z: 0 } // Anchor on receiver
-      );
-
-      const newJoint = world.createImpulseJoint(
-        jointParams,
-        secondToLastLink.rigidBody,
-        this.receiverRigidBody,
-        true
-      );
-
-      secondToLastLink.joint = newJoint;
-
-      console.log("PhoneBooth: Reconnected cord to receiver rigid body");
-
-      // Remove the old kinematic anchor from physics and cordLinks
-      world.removeRigidBody(this.receiverAnchor);
-      this.cordLinks.splice(lastLinkIndex, 1);
-
-      // Replace receiverAnchor reference with new rigid body
-      this.receiverAnchor = this.receiverRigidBody;
-    } else {
-      console.warn("PhoneBooth: Could not find receiver anchor in cord links");
-    }
+    // Start drop animation: move 1m down and flip upside down
+    this.startReceiverDropLerp();
 
     // Re-enable character physics collisions now that receiver is dropped
     if (this.characterController) {
@@ -730,6 +820,7 @@ class PhoneBooth {
    */
   update(dt) {
     this.updateReceiverLerp(dt);
+    this.updateReceiverDropLerp(dt);
 
     // If receiver position is locked, enforce it (prevents animation system from moving it)
     if (
@@ -819,6 +910,60 @@ class PhoneBooth {
   }
 
   /**
+   * Initialize receiver in dropped state (for debug spawning into DRIVE_BY or later)
+   * Positions the receiver in its final dangling position without animation
+   */
+  initializeReceiverInDroppedState() {
+    if (
+      !this.receiver ||
+      !this.receiverOriginalWorldPos ||
+      !this.receiverOriginalWorldRot ||
+      !this.cordAttach
+    ) {
+      console.warn(
+        "PhoneBooth: Cannot initialize dropped state - missing receiver or original position"
+      );
+      return;
+    }
+
+    // Detach from phonebooth and add to scene
+    this.scene.attach(this.receiver);
+
+    // Position below the end of the rigid cord section
+    const cordAttachPos = new THREE.Vector3();
+    this.cordAttach.getWorldPosition(cordAttachPos);
+
+    const droppedPos = cordAttachPos.clone();
+    // Position at end of rigid section
+    droppedPos.x +=
+      this.config.cordSegmentLength * this.config.cordRigidSegments;
+    droppedPos.y -= this.config.cordSegmentLength * 2; // Match curve
+    droppedPos.y -= 0.3; // Hang below the rigid section
+
+    // Flip the original rotation upside down (180 degrees on X axis)
+    const droppedQuat = this.receiverOriginalWorldRot.clone();
+    const flipRotation = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(1, 0, 0),
+      Math.PI
+    );
+    droppedQuat.multiply(flipRotation);
+
+    // Apply transform
+    this.receiver.position.copy(droppedPos);
+    this.receiver.quaternion.copy(droppedQuat);
+
+    console.log(
+      "PhoneBooth: Receiver initialized in dropped state below rigid cord at:",
+      droppedPos.toArray()
+    );
+
+    // Re-enable character physics collisions (they would have been disabled when held)
+    if (this.characterController) {
+      this.characterController.enablePhysicsCollisions();
+    }
+  }
+
+  /**
    * Clean up resources
    */
   destroy() {
@@ -829,6 +974,7 @@ class PhoneBooth {
     }
     this.receiver = null;
     this.receiverLerp = null;
+    this.receiverDropLerp = null;
     this.cordAttach = null;
     this.receiverAnchor = null;
   }

@@ -4,6 +4,7 @@
  * Each dialog sequence contains:
  * - id: Unique identifier for the dialog
  * - audio: Path to the audio file
+ * - preload: If true, load during loading screen; if false, load after (default: false)
  * - captions: Array of caption objects with:
  *   - text: The text to display
  *   - duration: How long to show this caption (in seconds)
@@ -35,6 +36,7 @@ export const dialogTracks = {
   intro: {
     id: "intro",
     audio: "./audio/dialog/00-on-her-trail.mp3",
+    preload: true, // Load before showing game
     captions: [
       { text: "I'd been on her trail for weeks.", duration: 2.0 },
       { text: "An art thief, she'd swindled society-types,", duration: 3.5 },
@@ -70,10 +72,44 @@ export const dialogTracks = {
     },
   },
 
+  // Radio captions (audio is handled by sfxData.js with reactive light)
+  radioCaptions: {
+    id: "radioCaptions",
+    // No audio - the radio SFX plays independently with reactive light
+    captions: [
+      { text: "Czar strikes again!", duration: 1.5 },
+      { text: "Brazen brute bashes bank!", duration: 2.0 },
+      { text: "Czar's zealots embezzle zillions!", duration: 2.25 },
+      { text: "Cops can't quell criminal caper!", duration: 2.0 },
+      { text: "This and more tonight, on City Beat!", duration: 2.25 },
+    ],
+    criteria: { currentState: GAME_STATES.NEAR_RADIO },
+    once: true,
+    autoPlay: true,
+    priority: 100,
+    delay: 2.75, // Start captions immediately when near radio
+  },
+
+  heyYouBeingWatched: {
+    id: "heyYouBeingWatched",
+    audio: "./audio/dialog/cole-hey-you-being-watched.mp3",
+    preload: false, // Load after loading screen
+    captions: [
+      { text: "Hey, you!", duration: 2.0 },
+      { text: "Feels like I'm being watched...", duration: 3.5 },
+    ],
+    criteria: { shadowGlimpse: true },
+    once: true,
+    autoPlay: true,
+    priority: 100,
+    delay: 2.0,
+  },
+
   // Dialog that plays when phone starts ringing
   okayICanTakeAHint: {
     id: "okayICanTakeAHint",
     audio: "./audio/dialog/01-okay-i-can-take-a-hint.mp3",
+    preload: false, // Load after loading screen
     captions: [{ text: "Okay, I can take a hint.", duration: 2.0 }],
     criteria: { currentState: GAME_STATES.PHONE_BOOTH_RINGING },
     once: true,
@@ -86,6 +122,7 @@ export const dialogTracks = {
   bonneSoiree: {
     id: "bonneSoiree",
     audio: "./audio/dialog/02-bonne-soiree.mp3",
+    preload: false, // Load after loading screen
     captions: [
       { text: "Bonne soirée...", duration: 1.5 },
       { text: "I presume you know who this is?", duration: 2 },
@@ -101,6 +138,7 @@ export const dialogTracks = {
   dialogChoice1Empath: {
     id: "dialogChoice1Empath",
     audio: "./audio/dialog/choice-1_empath_someone-who-made-a-mistake.mp3",
+    preload: false, // Load after loading screen
     captions: [
       { text: "Someone who made a little mistake, that's all.", duration: 2.5 },
     ],
@@ -147,6 +185,7 @@ export const dialogTracks = {
   dialogChoice1Lawful: {
     id: "dialogChoice1Lawful",
     audio: "./audio/dialog/choice-1_lawful_someone-with-stolen-property.mp3",
+    preload: false, // Load after loading screen
     captions: [
       {
         text: "Someone with stolen property in their possession",
@@ -172,6 +211,7 @@ export const dialogTracks = {
   dialogChoice1EmpathResponse: {
     id: "dialogChoice1EmpathResponse",
     audio: "./audio/dialog/resp-1_empath_oui-and-ive-made-so-many.mp3",
+    preload: false, // Load after loading screen
     captions: [{ text: "Oui, and I've made *so* many.", duration: 2.5 }],
     criteria: {
       currentState: GAME_STATES.DIALOG_CHOICE_1,
@@ -191,6 +231,7 @@ export const dialogTracks = {
   dialogChoice1PsychologistResponse: {
     id: "dialogChoice1PsychologistResponse",
     audio: "./audio/dialog/resp-1_psych_im-sure-youll-educate-me.mp3",
+    preload: false, // Load after loading screen
     captions: [{ text: "I'm sure you will educate me...", duration: 2.0 }],
     criteria: {
       currentState: GAME_STATES.DIALOG_CHOICE_1,
@@ -210,6 +251,7 @@ export const dialogTracks = {
   dialogChoice1LawfulResponse: {
     id: "dialogChoice1LawfulResponse",
     audio: "./audio/dialog/resp-1_lawful_hm-quite-the-lawman-you-are.mp3",
+    preload: false, // Load after loading screen
     captions: [{ text: "Hm, quite the lawman you are.", duration: 2.0 }],
     criteria: {
       currentState: GAME_STATES.DIALOG_CHOICE_1,
@@ -230,6 +272,7 @@ export const dialogTracks = {
   coleGoodKitty: {
     id: "coleGoodKitty",
     audio: "./audio/dialog/cole-aw-good-kitty.mp3",
+    preload: false, // Load after loading screen
     captions: [{ text: "Aw, good kitty.", duration: 2.0 }],
     criteria: {
       currentState: GAME_STATES.CAT_DIALOG_CHOICE,
@@ -245,6 +288,7 @@ export const dialogTracks = {
   coleDamnCats: {
     id: "coleDamnCats",
     audio: "./audio/dialog/cole-damn-cats.mp3",
+    preload: false, // Load after loading screen
     captions: [{ text: "Damn cats.", duration: 2.0 }],
     criteria: {
       currentState: GAME_STATES.CAT_DIALOG_CHOICE,
@@ -260,6 +304,7 @@ export const dialogTracks = {
   theyreHereForYou: {
     id: "theyreHereForYou",
     audio: "./audio/dialog/04-theyre-here-for-you-duck-and-cover-now.mp3",
+    preload: false, // Load after loading screen
     captions: [
       { text: "They're here for you!", duration: 1.65 },
       { text: "Duck and cover, now!", duration: 2.0 },

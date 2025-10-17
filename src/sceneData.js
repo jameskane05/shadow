@@ -91,8 +91,8 @@ export const sceneObjects = {
     type: "gltf",
     path: "/gltf/radio-1.glb",
     description: "Radio GLTF model",
-    position: { x: 10.55, y: -1.03, z: 40 },
-    rotation: { x: -2.9661, y: 1.1433, z: 3.1416 },
+    position: { x: 4.04, y: -0.28, z: 35.45 },
+    rotation: { x: 3.1293, y: 1.1503, z: -2.9357 },
     scale: { x: 2.46, y: 2.46, z: 2.46 },
     options: {
       useContainer: true,
@@ -115,9 +115,9 @@ export const sceneObjects = {
     criteria: {
       currentState: {
         $gte: GAME_STATES.ANSWERED_PHONE,
+        $lt: GAME_STATES.POST_DRIVE_BY,
       },
     },
-    loadByDefault: true,
     priority: 50,
     animations: [
       {
@@ -129,6 +129,7 @@ export const sceneObjects = {
         criteria: {
           currentState: {
             $gte: GAME_STATES.DRIVE_BY_PREAMBLE,
+            $lt: GAME_STATES.POST_DRIVE_BY,
           },
         },
       },

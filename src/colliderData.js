@@ -116,6 +116,81 @@ export const colliders = [
     enabled: true,
   },
 
+  // Radio proximity trigger (one-time state progression)
+  {
+    id: "radio-state-trigger",
+    type: "sphere",
+    position: sceneObjects.radio.position,
+    rotation: { x: 0, y: 0, z: 0 },
+    dimensions: { radius: 8 },
+    onEnter: [
+      {
+        type: "state",
+        data: { key: "currentState", value: GAME_STATES.NEAR_RADIO },
+      },
+    ],
+    onExit: [],
+    once: true, // Only trigger once - state progresses forward only
+    enabled: true,
+    criteria: {
+      currentState: {
+        $gte: GAME_STATES.TITLE_SEQUENCE_COMPLETE,
+        $lt: GAME_STATES.NEAR_RADIO,
+      },
+    },
+  },
+
+  // Radio proximity toggle (for music crossfade)
+  {
+    id: "radio-proximity-toggle",
+    type: "sphere",
+    position: sceneObjects.radio.position,
+    rotation: { x: 0, y: 0, z: 0 },
+    dimensions: { radius: 10 },
+    onEnter: [
+      {
+        type: "state",
+        data: { key: "nearRadio", value: true },
+      },
+    ],
+    onExit: [
+      {
+        type: "state",
+        data: { key: "nearRadio", value: false },
+      },
+    ],
+    once: false, // Repeatable - toggles on/off
+    enabled: true,
+    criteria: {
+      currentState: {
+        $gte: GAME_STATES.TITLE_SEQUENCE_COMPLETE,
+      },
+    },
+  },
+
+  // Shadow glimpse trigger
+  {
+    id: "shadow-glimpse-trigger",
+    type: "sphere",
+    position: { x: -9.29, y: 0.27, z: 37.47 },
+    rotation: { x: 0, y: 0, z: 0 },
+    dimensions: { radius: 2 },
+    onEnter: [
+      {
+        type: "state",
+        data: { key: "shadowGlimpse", value: true },
+      },
+    ],
+    onExit: [],
+    once: true, // Only trigger once
+    enabled: true,
+    criteria: {
+      currentState: {
+        $gte: GAME_STATES.TITLE_SEQUENCE_COMPLETE,
+      },
+    },
+  },
+
   // {
   //   id: "shoulderTap",
   //   type: "box",

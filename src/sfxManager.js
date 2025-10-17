@@ -15,6 +15,7 @@ import { checkCriteria } from "./criteriaHelper.js";
 class SFXManager {
   constructor(options = {}) {
     this.masterVolume = options.masterVolume || 0.5;
+    this.loadingScreen = options.loadingScreen || null; // For progress tracking
     this.sounds = new Map(); // Map of id -> {howl, baseVolume}
     this.dialogManager = null; // Will be set externally
     this.lightManager = options.lightManager || null; // LightManager for reactive lights
@@ -22,6 +23,9 @@ class SFXManager {
 
     // Track sounds that have been played once (for playOnce functionality)
     this.playedSounds = new Set();
+
+    // Store deferred sounds for later loading
+    this.deferredSounds = new Map(); // Store sound data for later loading
 
     // Delayed playback support
     this.pendingSounds = new Map(); // Map of soundId -> { soundId, timer, delay }
@@ -233,11 +237,40 @@ class SFXManager {
     // Keep a reference to the raw data definitions for state-driven rules
     this._data = soundsData;
     Object.values(soundsData).forEach((sound) => {
+      const preload = sound.preload !== false; // Default to true
+
+      // If preload is false, defer loading
+      if (!preload) {
+        this.deferredSounds.set(sound.id, sound);
+        console.log(`SFXManager: Deferred loading for sound "${sound.id}"`);
+        return;
+      }
+
+      // Register with loading screen if available and preloading
+      if (this.loadingScreen && preload) {
+        this.loadingScreen.registerTask(`sfx_${sound.id}`, 1);
+      }
+
       const howl = new Howl({
         src: sound.src,
         loop: sound.loop,
         volume: sound.volume,
-        preload: sound.preload !== false,
+        preload: preload,
+        onload: () => {
+          console.log(`SFXManager: Loaded sound "${sound.id}"`);
+          if (this.loadingScreen && preload) {
+            this.loadingScreen.completeTask(`sfx_${sound.id}`);
+          }
+        },
+        onloaderror: (id, error) => {
+          console.error(
+            `SFXManager: Failed to load sound "${sound.id}":`,
+            error
+          );
+          if (this.loadingScreen && preload) {
+            this.loadingScreen.completeTask(`sfx_${sound.id}`);
+          }
+        },
       });
 
       // Apply spatial attributes after creation
@@ -269,6 +302,62 @@ class SFXManager {
         this.lightManager.createReactiveLight(sound.id, howl, lightConfig);
       }
     });
+  }
+
+  /**
+   * Load deferred sounds (called after loading screen)
+   */
+  loadDeferredSounds() {
+    console.log(
+      `SFXManager: Loading ${this.deferredSounds.size} deferred sounds`
+    );
+    for (const [id, sound] of this.deferredSounds) {
+      const howl = new Howl({
+        src: sound.src,
+        loop: sound.loop,
+        volume: sound.volume,
+        preload: true, // Load now
+        onload: () => {
+          console.log(`SFXManager: Loaded deferred sound "${sound.id}"`);
+        },
+        onloaderror: (id, error) => {
+          console.error(
+            `SFXManager: Failed to load deferred sound "${sound.id}":`,
+            error
+          );
+        },
+      });
+
+      // Apply spatial attributes after creation
+      if (sound.spatial) {
+        if (sound.position) {
+          howl.pos(sound.position.x, sound.position.y, sound.position.z);
+        }
+        if (sound.pannerAttr) howl.pannerAttr(sound.pannerAttr);
+      }
+
+      this.registerSound(sound.id, howl, sound.volume ?? 1.0);
+
+      // Request audio-reactive light creation from lightManager if configured
+      if (
+        sound.reactiveLight &&
+        sound.reactiveLight.enabled &&
+        this.lightManager
+      ) {
+        // Apply offset to sound position for reactive light
+        const lightConfig = { ...sound.reactiveLight };
+        if (sound.position && lightConfig.position) {
+          lightConfig.position = {
+            x: sound.position.x + (lightConfig.position.x || 0),
+            y: sound.position.y + (lightConfig.position.y || 0),
+            z: sound.position.z + (lightConfig.position.z || 0),
+          };
+        }
+
+        this.lightManager.createReactiveLight(sound.id, howl, lightConfig);
+      }
+    }
+    this.deferredSounds.clear();
   }
 
   /**
@@ -327,9 +416,66 @@ class SFXManager {
   /**
    * Play a sound by ID
    * @param {string} id - Sound identifier
-   * @returns {number|null} Sound ID from Howler (for stopping specific instances)
+   * @returns {number|null|Promise<number|null>} Sound ID from Howler (for stopping specific instances)
    */
-  play(id) {
+  async play(id) {
+    // Check if sound is deferred and needs to be loaded on-demand
+    if (!this.sounds.has(id) && this.deferredSounds.has(id)) {
+      console.log(`SFXManager: Loading deferred sound "${id}" on-demand`);
+      const sound = this.deferredSounds.get(id);
+
+      const howl = new Howl({
+        src: sound.src,
+        loop: sound.loop,
+        volume: sound.volume,
+        preload: true, // Load now
+      });
+
+      // Wait for the sound to load using Howler's event system
+      await new Promise((resolve) => {
+        howl.once("load", () => {
+          console.log(`SFXManager: Loaded on-demand sound "${id}"`);
+          resolve();
+        });
+        howl.once("loaderror", (loadId, error) => {
+          console.error(
+            `SFXManager: Failed to load on-demand sound "${id}":`,
+            error
+          );
+          resolve(); // Resolve anyway to prevent hanging
+        });
+      });
+
+      // Apply spatial attributes after loading
+      if (sound.spatial) {
+        if (sound.position) {
+          howl.pos(sound.position.x, sound.position.y, sound.position.z);
+        }
+        if (sound.pannerAttr) howl.pannerAttr(sound.pannerAttr);
+      }
+
+      this.registerSound(sound.id, howl, sound.volume ?? 1.0);
+
+      // Request audio-reactive light creation from lightManager if configured
+      if (
+        sound.reactiveLight &&
+        sound.reactiveLight.enabled &&
+        this.lightManager
+      ) {
+        const lightConfig = { ...sound.reactiveLight };
+        if (sound.position && lightConfig.position) {
+          lightConfig.position = {
+            x: sound.position.x + (lightConfig.position.x || 0),
+            y: sound.position.y + (lightConfig.position.y || 0),
+            z: sound.position.z + (lightConfig.position.z || 0),
+          };
+        }
+        this.lightManager.createReactiveLight(sound.id, howl, lightConfig);
+      }
+
+      this.deferredSounds.delete(id);
+    }
+
     const soundData = this.sounds.get(id);
     if (soundData && soundData.howl) {
       if (soundData.isProxy) {

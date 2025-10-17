@@ -38,6 +38,7 @@ class SceneManager {
   constructor(scene, options = {}) {
     this.scene = scene;
     this.gizmoManager = options.gizmoManager || null; // For debug positioning
+    this.loadingScreen = options.loadingScreen || null; // For progress tracking
     this.objects = new Map(); // Map of id -> THREE.Object3D
     this.objectData = new Map(); // Map of id -> original config data (for gizmo flag)
     this.gltfLoader = new GLTFLoader();
@@ -51,6 +52,9 @@ class SceneManager {
 
     // Event listeners
     this.eventListeners = {};
+
+    // Asset loading progress tracking
+    this.assetProgress = new Map(); // Map of asset id -> { loaded, total }
   }
 
   /**
@@ -196,9 +200,23 @@ class SceneManager {
    * @private
    */
   async _loadSplat(objectData) {
-    const { path, position, rotation, scale, quaternion } = objectData;
+    const { id, path, position, rotation, scale, quaternion } = objectData;
 
-    const splatMesh = new SplatMesh({ url: path });
+    // Register with loading screen if available
+    if (this.loadingScreen) {
+      this.loadingScreen.registerTask(`splat_${id}`, 100);
+    }
+
+    const splatMesh = new SplatMesh({
+      url: path,
+      onProgress: (progress) => {
+        // Progress is a number between 0 and 1
+        if (this.loadingScreen) {
+          const percentage = Math.round(progress * 100);
+          this.loadingScreen.updateTask(`splat_${id}`, percentage, 100);
+        }
+      },
+    });
 
     // Set quaternion if provided
     if (quaternion) {
@@ -231,6 +249,11 @@ class SceneManager {
     // Wait for splat to initialize
     await splatMesh.initialized;
 
+    // Mark as complete
+    if (this.loadingScreen) {
+      this.loadingScreen.completeTask(`splat_${id}`);
+    }
+
     return splatMesh;
   }
 
@@ -245,9 +268,19 @@ class SceneManager {
       const { id, path, position, rotation, scale, options, animations } =
         objectData;
 
+      // Register with loading screen if available
+      if (this.loadingScreen) {
+        this.loadingScreen.registerTask(`gltf_${id}`, 100);
+      }
+
       this.gltfLoader.load(
         path,
         (gltf) => {
+          // Mark as complete
+          if (this.loadingScreen) {
+            this.loadingScreen.completeTask(`gltf_${id}`);
+          }
+
           const model = gltf.scene;
 
           // Traverse all children and ensure materials are visible
@@ -314,7 +347,13 @@ class SceneManager {
           this.scene.add(finalObject);
           resolve(finalObject);
         },
-        undefined,
+        (xhr) => {
+          // Progress callback
+          if (xhr.lengthComputable && this.loadingScreen) {
+            const percentage = Math.round((xhr.loaded / xhr.total) * 100);
+            this.loadingScreen.updateTask(`gltf_${id}`, percentage, 100);
+          }
+        },
         (error) => {
           reject(error);
         }

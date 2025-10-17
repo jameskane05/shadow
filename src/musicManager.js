@@ -40,6 +40,7 @@ import { Howl, Howler } from "howler";
 class MusicManager {
   constructor(options = {}) {
     this.defaultVolume = options.defaultVolume || 1.0;
+    this.loadingScreen = options.loadingScreen || null; // For progress tracking
     this.tracks = {}; // Store Howl instances by name
     this.currentTrack = null;
     this.isTransitioning = false;
@@ -83,6 +84,13 @@ class MusicManager {
     this.setVolume = this.setVolume.bind(this);
 
     this.gameManager = null;
+
+    // Track original volume for radio proximity fading
+    this.originalVolume = this.defaultVolume;
+    this.isNearRadio = false;
+
+    // Store pending loads for deferred assets
+    this.deferredTracks = new Map(); // Store track data for later loading
   }
 
   /**
@@ -92,41 +100,120 @@ class MusicManager {
   setGameManager(gameManager) {
     this.gameManager = gameManager;
 
-    // Import getMusicForState
-    import("./musicData.js").then(({ getMusicForState }) => {
-      // Listen for state changes
-      this.gameManager.on("state:changed", (newState, oldState) => {
-        const track = getMusicForState(newState);
-        if (!track) return;
+    // Import getMusicForState and GAME_STATES
+    Promise.all([import("./musicData.js"), import("./gameData.js")]).then(
+      ([{ getMusicForState }, { GAME_STATES }]) => {
+        // Listen for state changes
+        this.gameManager.on("state:changed", (newState, oldState) => {
+          const track = getMusicForState(newState);
+          if (!track) return;
 
-        // Only change music if it's different from current track
-        if (this.getCurrentTrack() !== track.id) {
-          console.log(
-            `MusicManager: Changing music to "${track.id}" (${track.description})`
-          );
-          this.changeMusic(track.id, track.fadeTime || 0);
-        }
-      });
+          // Only change music if it's different from current track
+          if (this.getCurrentTrack() !== track.id) {
+            console.log(
+              `MusicManager: Changing music to "${track.id}" (${track.description})`
+            );
+            this.changeMusic(track.id, track.fadeTime || 0);
+          }
 
-      console.log("MusicManager: Event listeners registered");
-    });
+          // Handle nearRadio boolean state for volume ducking
+          if (
+            newState.nearRadio !== undefined &&
+            newState.nearRadio !== this.isNearRadio
+          ) {
+            this.isNearRadio = newState.nearRadio;
+
+            if (this.isNearRadio) {
+              // Store current volume and fade to 5%
+              this.originalVolume = this.defaultVolume;
+              console.log(`MusicManager: Near radio, fading music to 5%`);
+              this.setVolume(0.05, 2.5); // Fade to 5% over 2.5 seconds
+            } else {
+              // Restore original volume
+              console.log(
+                `MusicManager: Leaving radio area, restoring music volume to ${this.originalVolume}`
+              );
+              this.setVolume(this.originalVolume, 2.5); // Fade back over 2.5 seconds
+            }
+          }
+        });
+
+        console.log("MusicManager: Event listeners registered");
+      }
+    );
   }
 
   /**
    * Add a music track to the manager
    * @param {string} name - Name/ID for this track
    * @param {string|string[]} src - Path or array of paths to audio files
-   * @param {object} options - Additional Howler options
+   * @param {object} options - Additional Howler options (includes preload flag)
    */
   addTrack(name, src, options = {}) {
+    const preload = options.preload !== false; // Default to true if not specified
+
+    // If preload is false, store for later loading
+    if (!preload) {
+      this.deferredTracks.set(name, { src, options });
+      console.log(`MusicManager: Deferred loading for track "${name}"`);
+      return null;
+    }
+
+    // Register with loading screen if available and preloading
+    if (this.loadingScreen && preload) {
+      this.loadingScreen.registerTask(`music_${name}`, 1);
+    }
+
     this.tracks[name] = new Howl({
       src: Array.isArray(src) ? src : [src],
       loop: options.loop !== undefined ? options.loop : true,
       volume:
         options.volume !== undefined ? options.volume : this.defaultVolume,
+      preload: preload,
+      onload: () => {
+        console.log(`MusicManager: Loaded track "${name}"`);
+        if (this.loadingScreen && preload) {
+          this.loadingScreen.completeTask(`music_${name}`);
+        }
+      },
+      onloaderror: (id, error) => {
+        console.error(`MusicManager: Failed to load track "${name}":`, error);
+        if (this.loadingScreen && preload) {
+          this.loadingScreen.completeTask(`music_${name}`);
+        }
+      },
       ...options,
     });
     return this.tracks[name];
+  }
+
+  /**
+   * Load deferred tracks (called after loading screen)
+   */
+  loadDeferredTracks() {
+    console.log(
+      `MusicManager: Loading ${this.deferredTracks.size} deferred tracks`
+    );
+    for (const [name, { src, options }] of this.deferredTracks) {
+      this.tracks[name] = new Howl({
+        src: Array.isArray(src) ? src : [src],
+        loop: options.loop !== undefined ? options.loop : true,
+        volume:
+          options.volume !== undefined ? options.volume : this.defaultVolume,
+        preload: true, // Load now
+        onload: () => {
+          console.log(`MusicManager: Loaded deferred track "${name}"`);
+        },
+        onloaderror: (id, error) => {
+          console.error(
+            `MusicManager: Failed to load deferred track "${name}":`,
+            error
+          );
+        },
+        ...options,
+      });
+    }
+    this.deferredTracks.clear();
   }
 
   /**
@@ -134,12 +221,69 @@ class MusicManager {
    * @param {string} trackName - Name of the track to play
    * @param {number} fadeIn - Duration of fade in seconds (0 for instant)
    */
-  changeMusic(trackName, fadeIn = 0.0) {
+  async changeMusic(trackName, fadeIn = 0.0) {
+    // Check if track is deferred and needs to be loaded on-demand
+    if (!this.tracks[trackName] && this.deferredTracks.has(trackName)) {
+      console.log(
+        `MusicManager: Loading deferred track "${trackName}" on-demand`
+      );
+      const { src, options } = this.deferredTracks.get(trackName);
+
+      // Load the track now
+      this.tracks[trackName] = new Howl({
+        src: Array.isArray(src) ? src : [src],
+        loop: options.loop !== undefined ? options.loop : true,
+        volume:
+          options.volume !== undefined ? options.volume : this.defaultVolume,
+        preload: true, // Load now
+        onload: () => {
+          console.log(`MusicManager: Loaded on-demand track "${trackName}"`);
+        },
+        onloaderror: (id, error) => {
+          console.error(
+            `MusicManager: Failed to load on-demand track "${trackName}":`,
+            error
+          );
+        },
+        ...options,
+      });
+
+      this.deferredTracks.delete(trackName);
+
+      // Wait a moment for the track to start loading
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
     if (this.isTransitioning || !this.tracks[trackName]) {
       console.warn(
         `MusicManager: Track "${trackName}" not found or transitioning`
       );
       return;
+    }
+
+    // Check if track is still loading (state() returns 'loading', 'loaded', or 'unloaded')
+    const howl = this.tracks[trackName];
+
+    // If track is unloaded, manually trigger loading
+    if (howl.state && howl.state() === "unloaded") {
+      howl.load();
+    }
+
+    // Wait for track to finish loading if it's not already loaded
+    if (howl.state && howl.state() !== "loaded") {
+      // Use Howler's event system instead of polling
+      await new Promise((resolve) => {
+        howl.once("load", () => {
+          resolve();
+        });
+        howl.once("loaderror", (id, error) => {
+          console.error(
+            `MusicManager: Failed to load track "${trackName}":`,
+            error
+          );
+          resolve(); // Resolve anyway to prevent hanging
+        });
+      });
     }
 
     this.isTransitioning = true;

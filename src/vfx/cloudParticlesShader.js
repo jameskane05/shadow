@@ -20,7 +20,7 @@ class CloudParticlesShader {
         options.particleSizeMin !== undefined ? options.particleSizeMin : 0.5,
       particleSizeMax:
         options.particleSizeMax !== undefined ? options.particleSizeMax : 1.5,
-      windSpeed: options.windSpeed || -0.3,
+      windSpeed: options.windSpeed || -1.3,
       opacity: options.opacity || 0.4,
       color: options.color || 0xffffff,
       fluffiness: options.fluffiness || 0.5,
@@ -49,6 +49,9 @@ class CloudParticlesShader {
     this.dynoOriginY = dyno.dynoFloat(0);
     this.dynoOriginZ = dyno.dynoFloat(0);
     this.dynoParticleCount = dyno.dynoFloat(this.options.particleCount);
+    this.dynoCameraX = dyno.dynoFloat(0);
+    this.dynoCameraY = dyno.dynoFloat(0);
+    this.dynoCameraZ = dyno.dynoFloat(0);
 
     // Transition state
     this.isTransitioning = false;
@@ -97,6 +100,13 @@ class CloudParticlesShader {
         // Update time uniform
         this.time = time;
         this.dynoTime.value = time;
+
+        // Update camera position for near-camera culling
+        if (this.camera) {
+          this.dynoCameraX.value = this.camera.position.x;
+          this.dynoCameraY.value = this.camera.position.y;
+          this.dynoCameraZ.value = this.camera.position.z;
+        }
 
         // Handle transitions
         this.handleTransitions(time);
@@ -218,6 +228,9 @@ class CloudParticlesShader {
             originY: "float",
             originZ: "float",
             particleCount: "float",
+            cameraX: "float",
+            cameraY: "float",
+            cameraZ: "float",
           },
           outTypes: { gsplat: dyno.Gsplat },
           globals: () => [
@@ -302,10 +315,18 @@ class CloudParticlesShader {
             );
             
             // Reconstruct world position
-            ${outputs.gsplat}.center = origin + localPos;
+            vec3 worldPos = origin + localPos;
+            ${outputs.gsplat}.center = worldPos;
             
-            // Update opacity
-            ${outputs.gsplat}.rgba.a = baseOpacity * ${inputs.opacity} / 0.035;
+            // Calculate distance from camera for near-camera culling
+            vec3 cameraPos = vec3(${inputs.cameraX}, ${inputs.cameraY}, ${inputs.cameraZ});
+            float distToCamera = length(worldPos - cameraPos);
+            
+            // Fade out particles near camera (0 opacity within 2 units, full opacity beyond 4 units)
+            float nearCameraFade = smoothstep(3.0, 5.0, distToCamera);
+            
+            // Update opacity with near-camera fade
+            ${outputs.gsplat}.rgba.a = baseOpacity * ${inputs.opacity} / 0.035 * nearCameraFade;
           `),
         });
 
@@ -322,6 +343,9 @@ class CloudParticlesShader {
           originY: this.dynoOriginY,
           originZ: this.dynoOriginZ,
           particleCount: this.dynoParticleCount,
+          cameraX: this.dynoCameraX,
+          cameraY: this.dynoCameraY,
+          cameraZ: this.dynoCameraZ,
         }).gsplat;
 
         return { gsplat };

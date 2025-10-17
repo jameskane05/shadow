@@ -19,6 +19,7 @@ class DialogManager {
     this.sfxManager = options.sfxManager || null;
     this.gameManager = options.gameManager || null;
     this.dialogChoiceUI = options.dialogChoiceUI || null;
+    this.loadingScreen = options.loadingScreen || null; // For progress tracking
 
     // Caption display (HTML)
     this.captionElement = options.captionElement || this.createCaptionElement();
@@ -43,6 +44,10 @@ class DialogManager {
     // Delayed playback support
     this.pendingDialogs = new Map(); // Map of dialogId -> { dialogData, onComplete, timer, delay }
 
+    // Preloading support
+    this.preloadedAudio = new Map(); // Map of dialogId -> Howl instance
+    this.deferredDialogs = new Map(); // Map of dialogId -> dialog data for later loading
+
     // Update volume based on SFX manager if available
     if (this.sfxManager) {
       this.audioVolume = this.baseVolume * this.sfxManager.getMasterVolume();
@@ -60,6 +65,94 @@ class DialogManager {
     if (this.gameManager) {
       this.setupStateListener();
     }
+  }
+
+  /**
+   * Preload dialog audio files
+   * @param {Object} dialogsData - Dialog data object (from dialogData.js)
+   */
+  preloadDialogs(dialogsData) {
+    if (!dialogsData) return;
+
+    Object.values(dialogsData).forEach((dialog) => {
+      if (!dialog.audio) return; // Skip dialogs without audio
+
+      const preload = dialog.preload !== false; // Default to true
+
+      // If preload is false, defer loading
+      if (!preload) {
+        this.deferredDialogs.set(dialog.id, dialog);
+        console.log(
+          `DialogManager: Deferred loading for dialog "${dialog.id}"`
+        );
+        return;
+      }
+
+      // Register with loading screen if available and preloading
+      if (this.loadingScreen && preload) {
+        this.loadingScreen.registerTask(`dialog_${dialog.id}`, 1);
+      }
+
+      // Preload the audio
+      const howl = new Howl({
+        src: [dialog.audio],
+        volume: this.audioVolume,
+        preload: true,
+        onload: () => {
+          console.log(`DialogManager: Preloaded dialog "${dialog.id}"`);
+          if (this.loadingScreen && preload) {
+            this.loadingScreen.completeTask(`dialog_${dialog.id}`);
+          }
+        },
+        onloaderror: (id, error) => {
+          console.error(
+            `DialogManager: Failed to preload dialog "${dialog.id}":`,
+            error
+          );
+          if (this.loadingScreen && preload) {
+            this.loadingScreen.completeTask(`dialog_${dialog.id}`);
+          }
+        },
+        onend: () => {
+          this.handleDialogComplete();
+        },
+      });
+
+      this.preloadedAudio.set(dialog.id, howl);
+    });
+  }
+
+  /**
+   * Load deferred dialogs (called after loading screen)
+   */
+  loadDeferredDialogs() {
+    console.log(
+      `DialogManager: Loading ${this.deferredDialogs.size} deferred dialogs`
+    );
+    for (const [id, dialog] of this.deferredDialogs) {
+      if (!dialog.audio) continue;
+
+      const howl = new Howl({
+        src: [dialog.audio],
+        volume: this.audioVolume,
+        preload: true,
+        onload: () => {
+          console.log(`DialogManager: Loaded deferred dialog "${dialog.id}"`);
+        },
+        onloaderror: (id, error) => {
+          console.error(
+            `DialogManager: Failed to load deferred dialog "${dialog.id}":`,
+            error
+          );
+        },
+        onend: () => {
+          this.handleDialogComplete();
+        },
+      });
+
+      this.preloadedAudio.set(dialog.id, howl);
+    }
+    this.deferredDialogs.clear();
   }
 
   /**
@@ -211,7 +304,7 @@ class DialogManager {
    * @param {Function} onComplete - Optional callback
    * @private
    */
-  _playDialogImmediate(dialogData, onComplete) {
+  async _playDialogImmediate(dialogData, onComplete) {
     this.currentDialog = dialogData;
     this.onCompleteCallback = onComplete;
     this.captionQueue = dialogData.captions || [];
@@ -221,19 +314,78 @@ class DialogManager {
 
     // Load and play audio
     if (dialogData.audio) {
-      this.currentAudio = new Howl({
-        src: [dialogData.audio],
-        volume: this.audioVolume,
-        onend: () => {
-          this.handleDialogComplete();
-        },
-        onloaderror: (id, error) => {
-          console.error("DialogManager: Failed to load audio", error);
-          this.handleDialogComplete();
-        },
-      });
+      // Check if audio was preloaded or loaded from deferred
+      if (this.preloadedAudio.has(dialogData.id)) {
+        console.log(
+          `DialogManager: Using preloaded audio for "${dialogData.id}"`
+        );
+        this.currentAudio = this.preloadedAudio.get(dialogData.id);
+        this.currentAudio.volume(this.audioVolume);
+        this.currentAudio.play();
+      } else {
+        // Check if this was a deferred dialog that hasn't been loaded yet
+        if (this.deferredDialogs.has(dialogData.id)) {
+          console.log(
+            `DialogManager: Loading deferred dialog "${dialogData.id}" on-demand`
+          );
+          const deferredDialog = this.deferredDialogs.get(dialogData.id);
 
-      this.currentAudio.play();
+          this.currentAudio = new Howl({
+            src: [deferredDialog.audio],
+            volume: this.audioVolume,
+            preload: true, // Explicitly load now
+            onend: () => {
+              this.handleDialogComplete();
+            },
+            onloaderror: (id, error) => {
+              console.error("DialogManager: Failed to load audio", error);
+              this.handleDialogComplete();
+            },
+          });
+
+          // Remove from deferred map and add to preloaded
+          this.deferredDialogs.delete(dialogData.id);
+          this.preloadedAudio.set(dialogData.id, this.currentAudio);
+        } else {
+          // Fallback: Load on-demand from dialogData
+          console.log(
+            `DialogManager: Loading audio on-demand for "${dialogData.id}"`
+          );
+          this.currentAudio = new Howl({
+            src: [dialogData.audio],
+            volume: this.audioVolume,
+            preload: true, // Explicitly load now
+            onend: () => {
+              this.handleDialogComplete();
+            },
+            onloaderror: (id, error) => {
+              console.error("DialogManager: Failed to load audio", error);
+              this.handleDialogComplete();
+            },
+          });
+        }
+
+        // Wait for the audio to load using Howler's event system (only if not already loaded)
+        if (this.currentAudio.state && this.currentAudio.state() !== "loaded") {
+          await new Promise((resolve) => {
+            this.currentAudio.once("load", () => {
+              console.log(
+                `DialogManager: Loaded on-demand dialog "${dialogData.id}"`
+              );
+              resolve();
+            });
+            this.currentAudio.once("loaderror", (id, error) => {
+              console.error(
+                `DialogManager: Failed to load on-demand dialog "${dialogData.id}":`,
+                error
+              );
+              resolve(); // Resolve anyway to prevent hanging
+            });
+          });
+        }
+
+        this.currentAudio.play();
+      }
     }
 
     // Start first caption if available
@@ -381,8 +533,13 @@ class DialogManager {
       if (this.captionIndex < this.captionQueue.length) {
         this.showCaption(this.captionQueue[this.captionIndex]);
       } else {
-        // No more captions - hide the last one
+        // No more captions
         this.hideCaption();
+
+        // If there's no audio (caption-only dialog), complete the dialog now
+        if (!this.currentAudio) {
+          this.handleDialogComplete();
+        }
       }
     }
   }

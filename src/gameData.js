@@ -14,15 +14,17 @@ export const GAME_STATES = {
   TITLE_SEQUENCE_COMPLETE: 2, // Title sequence completes, intro narration starts, player starts
   INTRO_COMPLETE: 3,
   CAT_DIALOG_CHOICE: 4, // Player chooses reaction to cat
-  PHONE_BOOTH_RINGING: 5,
-  ANSWERED_PHONE: 6,
-  DIALOG_CHOICE_1: 7,
-  DRIVE_BY_PREAMBLE: 8,
-  DRIVE_BY: 9,
-  SHOULDER_TAP: 10,
-  PUNCH_OUT: 11,
-  FALLEN: 12,
-  OFFICE_INTERIOR: 13,
+  NEAR_RADIO: 5, // Player approaches the radio (triggers radio audio)
+  PHONE_BOOTH_RINGING: 6,
+  ANSWERED_PHONE: 7,
+  DIALOG_CHOICE_1: 8,
+  DRIVE_BY_PREAMBLE: 9,
+  DRIVE_BY: 10,
+  POST_DRIVE_BY: 11,
+  SHOULDER_TAP: 12,
+  PUNCH_OUT: 13,
+  FALLEN: 14,
+  OFFICE_INTERIOR: 15,
 };
 
 export const DIALOG_RESPONSE_TYPES = {
