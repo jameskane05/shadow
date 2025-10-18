@@ -115,7 +115,7 @@ export const sceneObjects = {
     criteria: {
       currentState: {
         $gte: GAME_STATES.ANSWERED_PHONE,
-        $lt: GAME_STATES.POST_DRIVE_BY,
+        //$lt: GAME_STATES.POST_DRIVE_BY,
       },
     },
     priority: 50,
@@ -129,7 +129,7 @@ export const sceneObjects = {
         criteria: {
           currentState: {
             $gte: GAME_STATES.DRIVE_BY_PREAMBLE,
-            $lt: GAME_STATES.POST_DRIVE_BY,
+            //$lt: GAME_STATES.POST_DRIVE_BY,
           },
         },
       },

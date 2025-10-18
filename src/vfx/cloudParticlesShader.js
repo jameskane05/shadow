@@ -14,10 +14,10 @@ class CloudParticlesShader {
     this.spawnPosition = null;
 
     // Fog settings - edit these directly
-    this.particleCount = 4000;
-    this.cloudSize = 40;
-    this.particleSize = 1.5;
-    this.particleSizeMin = 1;
+    this.particleCount = 16000;
+    this.cloudSize = 80;
+    this.particleSize = 2;
+    this.particleSizeMin = 0.75;
     this.particleSizeMax = 1.5;
     this.windSpeed = -0.5;
     this.opacity = 0.03;
@@ -26,16 +26,23 @@ class CloudParticlesShader {
     this.turbulence = 3;
     this.groundLevel = -1;
     this.fogHeight = 7.0;
-    this.fogFalloff = 1.3;
+    this.fogFalloff = 2;
+
+    // Gust model (analytic, avoids reversal/jumps)
+    this.gustAmplitude = 0.3; // speed variation amplitude
+    this.gustPeriod = 12.0; // seconds per full cycle
 
     this.splatMesh = null;
     this.splatCount = 0;
     this.time = 0;
     this.worldOrigin = null;
+    this._lastWindLogSecond = -1; // debug: throttle wind speed logs
 
     // Dyno uniforms for shader animation
     this.dynoTime = dyno.dynoFloat(0);
     this.dynoWindSpeed = dyno.dynoFloat(this.windSpeed);
+    this.dynoGustAmplitude = dyno.dynoFloat(this.gustAmplitude);
+    this.dynoGustPeriod = dyno.dynoFloat(this.gustPeriod);
     this.dynoOpacity = dyno.dynoFloat(this.opacity);
     this.dynoCloudSize = dyno.dynoFloat(this.cloudSize);
     this.dynoFluffiness = dyno.dynoFloat(this.fluffiness);
@@ -58,13 +65,25 @@ class CloudParticlesShader {
 
     // Wind variation state
     this.baseWindSpeed = this.windSpeed; // Store initial wind speed
-    this.windVariationEnabled = false; // DISABLED: causes jumps due to shader recalculation from initial position
+    this.windVariationEnabled = false; // Can be enabled - set to true to enable automatic wind shifts
+    this.windVariationMin = -1.0; // Minimum wind speed (more negative = stronger wind)
+    this.windVariationMax = -0.3; // Maximum wind speed (less negative = weaker wind)
+    this.windTransitionDurationMin = 8; // Min seconds for wind transition
+    this.windTransitionDurationMax = 12; // Max seconds for wind transition
+    this.windHoldTimeMin = 5; // Min seconds to hold wind speed before next change
+    this.windHoldTimeMax = 15; // Max seconds to hold wind speed before next change
+    this.nextWindChangeTime = 5; // When to trigger next wind change
+    this.windTransitionStart = 0;
+    this.windTransitionDuration = 10;
+    this.windTransitionStartValue = this.windSpeed;
+    this.windTransitionTargetValue = this.windSpeed;
+    this.isTransitioningWind = false;
 
     // Opacity variation state (this works great because opacity doesn't accumulate over time!)
     this.baseOpacity = this.opacity; // Store initial opacity
-    this.opacityVariationEnabled = true;
-    this.opacityVariationMin = 0.5; // Min multiplier (e.g., 0.5 = 50% of base)
-    this.opacityVariationMax = 1.15; // Max multiplier (e.g., 1.5 = 150% of base)
+    this.opacityVariationEnabled = false;
+    this.opacityVariationMin = 0.95; // Min multiplier (e.g., 0.5 = 50% of base)
+    this.opacityVariationMax = 1.05; // Max multiplier (e.g., 1.5 = 150% of base)
     this.opacityVariationHoldTimeMin = 5; // Min seconds to wait before next change
     this.opacityVariationHoldTimeMax = 15; // Max seconds to wait before next change
     this.nextOpacityChangeTime =
@@ -72,7 +91,7 @@ class CloudParticlesShader {
       Math.random() *
         (this.opacityVariationHoldTimeMax - this.opacityVariationHoldTimeMin);
     this.opacityTransitionStart = 0;
-    this.opacityTransitionDuration = 2; // How long to transition in seconds
+    this.opacityTransitionDuration = 6; // How long to transition in seconds
     this.opacityTransitionStartValue = this.opacity;
     this.opacityTransitionTargetValue = this.opacity;
     this.isTransitioningOpacity = false;
@@ -132,6 +151,24 @@ class CloudParticlesShader {
 
         // Handle opacity variation
         this.handleOpacityVariation(time);
+
+        // Debug: log effective wind speed once per second
+        const logSec = Math.floor(time);
+        if (logSec !== this._lastWindLogSecond) {
+          this._lastWindLogSecond = logSec;
+          const omega = (Math.PI * 2) / Math.max(this.gustPeriod, 0.1);
+          const effectiveWind =
+            this.windSpeed + this.gustAmplitude * Math.sin(omega * time);
+          console.log(
+            `🌬️ wind(t=${logSec}s): base=${this.windSpeed.toFixed(
+              2
+            )}, gustAmp=${this.gustAmplitude.toFixed(
+              2
+            )}, period=${this.gustPeriod.toFixed(
+              1
+            )}s, effective=${effectiveWind.toFixed(2)}`
+          );
+        }
 
         // For objectModifier with position changes, we need updateVersion()
         mesh.updateVersion();
@@ -234,6 +271,8 @@ class CloudParticlesShader {
             gsplat: dyno.Gsplat,
             t: "float",
             windSpeed: "float",
+            gustAmplitude: "float",
+            gustPeriod: "float",
             opacity: "float",
             cloudSize: "float",
             fluffiness: "float",
@@ -299,14 +338,23 @@ class CloudParticlesShader {
             float phase = random.w * 6.28318; // 2*PI
             
             float time = ${inputs.t};
-            
-            // Apply wind drift (use modulo to prevent infinite acceleration)
-            // Wrap time to a period that covers 2x the cloud size to ensure smooth cycling
-            float windSpeed = ${inputs.windSpeed};
-            float driftPeriod = (${inputs.cloudSize} * 4.0) / abs(windSpeed + 0.0001); // Time to drift across 2x cloud diameter
-            float wrappedTime = mod(time, driftPeriod);
-            vec3 windDirection = vec3(windSpeed * 0.3, 0.0, windSpeed * 1.0);
-            localPos += windDirection * wrappedTime;
+
+            // Analytic gust model: speed(t) = base + A*sin(omega*t)
+            // Distance(t) = base*t - (A/omega)*cos(omega*t) + (A/omega)
+            // We subtract cos term so distance starts at 0 when t=0
+            float baseSpeed = ${inputs.windSpeed};
+            float A = ${inputs.gustAmplitude};
+            float period = max(${inputs.gustPeriod}, 0.1);
+            float omega = 6.2831853 / period; // 2*PI / T
+            float dist = baseSpeed * time - (A / omega) * cos(omega * time) + (A / omega);
+
+            // Wrap distance to keep particles bounded
+            float wrapLen = ${inputs.cloudSize} * 2.0; // along wind axis
+            dist = mod(dist + wrapLen, 2.0 * wrapLen) - wrapLen;
+
+            // Apply wind axis (x,z)
+            vec3 windDir = normalize(vec3(0.3, 0.0, 1.0));
+            localPos += windDir * dist;
             
             // Add lateral oscillation
             float lateralOffset = lateralSpeed * sin(phase + time * lateralFreq);
@@ -348,6 +396,8 @@ class CloudParticlesShader {
           gsplat,
           t: this.dynoTime,
           windSpeed: this.dynoWindSpeed,
+          gustAmplitude: this.dynoGustAmplitude,
+          gustPeriod: this.dynoGustPeriod,
           opacity: this.dynoOpacity,
           cloudSize: this.dynoCloudSize,
           fluffiness: this.dynoFluffiness,
@@ -476,17 +526,18 @@ class CloudParticlesShader {
       !this.isTransitioning &&
       time >= this.nextWindChangeTime
     ) {
-      // Pick a new target wind speed within +/- 1 of base wind speed, ensuring it stays negative
-      // Calculate range: base ± 1, but clamp to stay between base-1 and -0.1
-      const minSpeed = this.baseWindSpeed - 1; // More negative (stronger wind)
-      const maxSpeed = Math.min(this.baseWindSpeed + 1, -0.1); // Less negative (weaker wind), but always negative
+      // Pick a new target wind speed within configured min/max range
+      const minSpeed = this.windVariationMin; // More negative (stronger wind)
+      const maxSpeed = this.windVariationMax; // Less negative (weaker wind)
       const targetSpeed = minSpeed + Math.random() * (maxSpeed - minSpeed);
 
-      // Extra safety: ensure target is always negative
-      this.windTransitionTargetValue = Math.min(targetSpeed, -0.1);
+      this.windTransitionTargetValue = targetSpeed;
 
-      // Pick a random transition duration (8-10 seconds for gradual changes)
-      this.windTransitionDuration = 8 + Math.random() * 2;
+      // Pick a random transition duration
+      this.windTransitionDuration =
+        this.windTransitionDurationMin +
+        Math.random() *
+          (this.windTransitionDurationMax - this.windTransitionDurationMin);
 
       console.log(
         `🌬️ Wind change: ${this.windSpeed.toFixed(
@@ -495,9 +546,7 @@ class CloudParticlesShader {
           2
         )} over ${this.windTransitionDuration.toFixed(
           1
-        )}s (base: ${this.baseWindSpeed.toFixed(2)}, range: ${minSpeed.toFixed(
-          2
-        )} to ${maxSpeed.toFixed(2)})`
+        )}s (range: ${minSpeed.toFixed(2)} to ${maxSpeed.toFixed(2)})`
       );
       this.windTransitionStart = time;
       this.windTransitionStartValue = this.windSpeed;
@@ -531,8 +580,10 @@ class CloudParticlesShader {
         console.log(
           `  Wind transition complete at ${this.windSpeed.toFixed(2)}`
         );
-        // Schedule next wind change (5-15 seconds from now for proper hold time)
-        const holdTime = 5 + Math.random() * 10;
+        // Schedule next wind change using configured hold time range
+        const holdTime =
+          this.windHoldTimeMin +
+          Math.random() * (this.windHoldTimeMax - this.windHoldTimeMin);
         this.nextWindChangeTime = time + holdTime;
         console.log(`  Next wind change in ${holdTime.toFixed(1)}s`);
       }

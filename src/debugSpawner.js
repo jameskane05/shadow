@@ -61,7 +61,7 @@ const stateOverrides = {
     controlEnabled: true,
     playerPosition: {
       x: sceneObjects.phonebooth.position.x,
-      y: 0.4,
+      y: 0,
       z: sceneObjects.phonebooth.position.z,
     },
   },
@@ -74,11 +74,21 @@ const stateOverrides = {
   DRIVE_BY_PREAMBLE: {
     isPlaying: true,
     controlEnabled: true,
+    playerPosition: {
+      x: sceneObjects.phonebooth.position.x,
+      y: 0,
+      z: sceneObjects.phonebooth.position.z,
+    },
   },
 
   DRIVE_BY: {
     isPlaying: true,
     controlEnabled: true,
+    playerPosition: {
+      x: sceneObjects.phonebooth.position.x,
+      y: 0,
+      z: sceneObjects.phonebooth.position.z,
+    },
   },
 
   POST_DRIVE_BY: {

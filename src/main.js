@@ -24,11 +24,9 @@ import { GAME_STATES } from "./gameData.js";
 import CameraAnimationManager from "./cameraAnimationManager.js";
 import cameraAnimations from "./cameraAnimationData.js";
 import GizmoManager from "./gizmoManager.js";
-import { createCloudParticles } from "./vfx/cloudParticles.js";
 import { createCloudParticlesShader } from "./vfx/cloudParticlesShader.js";
 import DesaturationEffect from "./vfx/desaturationEffect.js";
 import { LoadingScreen } from "./loadingScreen.js";
-import GUI from "lil-gui";
 import "./styles/optionsMenu.css";
 import "./styles/dialog.css";
 import "./styles/loadingScreen.css";
@@ -38,10 +36,6 @@ const loadingScreen = new LoadingScreen();
 
 // Register loading tasks (scene assets and audio files will register themselves as they load)
 loadingScreen.registerTask("initialization", 1);
-
-// Toggle between CPU-based and shader-based fog systems
-// false = CPU-based (original), true = shader-based (GPU)
-const USE_SHADER_FOG = true;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(
@@ -96,11 +90,16 @@ window.sceneManager = sceneManager;
 // Make desaturation effect globally accessible
 window.desaturationEffect = desaturationEffect;
 
-// Initialize the physics manager
-const physicsManager = new PhysicsManager();
-
 // Initialize game manager early to check for debug spawn
 const gameManager = new GameManager();
+
+// Initialize light manager BEFORE fog so splat lights can affect fog particles
+// Pass sceneManager so lights can be parented under specific scene objects
+// Pass gameManager so lights can check criteria before loading
+const lightManager = new LightManager(scene, sceneManager, gameManager);
+
+// Initialize the physics manager
+const physicsManager = new PhysicsManager();
 
 // Create character rigid body (capsule)
 // Capsule: halfHeight=0.5, radius=0.3, total height = 1.6m
@@ -132,89 +131,19 @@ camera.position.set(
   spawnPos.z
 );
 
-// Determine fog spawn position based on game state
-// If START_SCREEN, use phonebooth position (where camera circles)
-// Otherwise use character spawn position (supports debug spawning)
-const fogSpawnPosition =
-  gameManager.state.currentState === GAME_STATES.START_SCREEN
-    ? {
-        x: sceneObjects.phonebooth.position.x,
-        y: sceneObjects.phonebooth.position.y,
-        z: sceneObjects.phonebooth.position.z,
-      }
-    : spawnPos;
+// Create rolling fog effect using GPU shader-based Gaussian splats
+// IMPORTANT: Created AFTER light manager so splat lights can affect the fog particles
+// Pass camera so fog initializes around camera position and follows the character
+const cloudParticles = createCloudParticlesShader(scene, camera);
+console.log("Fog system loaded: GPU Shader-based ⚡");
 
-// Create rolling fog effect using Gaussian splats for proper depth sorting
-// IMPORTANT: Created BEFORE light manager so splat lights can affect the fog particles
-// Pass fogSpawnPosition so particles initialize around camera's initial location
-const fogOptions = {
-  camera: camera,
-  spawnPosition: fogSpawnPosition, // Use appropriate position based on game state
-  particleCount: 4000, // Final particle count
-  cloudSize: 40, // Particles spawn within this radius and are culled beyond it
-  particleSize: 1.5, // Final particle size
-  particleSizeMin: 1, // Min size multiplier (0.5x base size)
-  particleSizeMax: 1.5, // Max size multiplier (1.5x base size)
-  windSpeed: -0.5, // Starting wind speed (will transition to -1)
-  opacity: 0.03,
-  color: 0xffffff, // Darker gray so splat lights are more visible
-  fluffiness: 8, // More vertical variation for rolling effect
-  turbulence: 3, // More horizontal variation for swirling
-  // Ground fog parameters
-  groundLevel: -1, // Base ground level
-  fogHeight: 7.0, // Height of fog layer
-  fogFalloff: 1.3, // How quickly fog dissipates with height
-};
-
-const cloudParticles = USE_SHADER_FOG
-  ? createCloudParticlesShader(scene, camera)
-  : createCloudParticles(scene, fogOptions);
-
-console.log(
-  `Fog system loaded: ${
-    USE_SHADER_FOG ? "GPU Shader-based ⚡" : "CPU-based 🌫️"
-  }`
-);
-
-// Debug GUI for cloud particle parameters
-const debugGUI = new GUI({ title: "Cloud Particles Debug" });
-
-const windFolder = debugGUI.addFolder("Wind");
-windFolder.add(cloudParticles, "windSpeed", -5, 0, 0.1).name("Wind Speed");
-
-const movementFolder = debugGUI.addFolder("Movement");
-movementFolder.add(cloudParticles, "fluffiness", 0, 10, 0.1).name("Fluffiness");
-movementFolder.add(cloudParticles, "turbulence", 0, 5, 0.1).name("Turbulence");
-
-const areaFolder = debugGUI.addFolder("Area");
-areaFolder
-  .add(cloudParticles, "cloudSize", 10, 100, 5)
-  .name("Cloud Size")
-  .onChange(() => {
-    console.warn("cloudSize change requires respawn to take full effect");
-  });
-areaFolder.add(cloudParticles, "groundLevel", -5, 5, 0.1).name("Ground Level");
-areaFolder.add(cloudParticles, "fogHeight", 1, 20, 0.5).name("Fog Height");
-areaFolder.add(cloudParticles, "fogFalloff", 0.1, 5, 0.1).name("Fog Falloff");
-
-// Close folders by default for cleaner UI
-windFolder.close();
-movementFolder.close();
-areaFolder.close();
-
-// Make debug GUI and cloud particles globally accessible
-window.debugGUI = debugGUI;
+// Make cloud particles globally accessible
 window.cloudParticles = cloudParticles;
-
-// Hide debug GUI
-debugGUI.hide();
 
 // Manual trigger example (call from console):
 // cloudParticles.transitionTo({ windSpeed: -1, opacity: 0.01 }, 4.0)
 
-// Initialize light manager (automatically loads lights from lightData.js)
-// Created AFTER cloud particles so splat lights render on top additively
-const lightManager = new LightManager(scene);
+// Light manager already initialized above (before fog) so splat lights can affect fog
 
 // Initialize SFX manager (pass lightManager for audio-reactive lights)
 const sfxManager = new SFXManager({
@@ -553,10 +482,8 @@ renderer.setAnimationLoop(function animate(time) {
   // Always update audio-reactive lights
   lightManager.updateReactiveLights(dt);
 
-  // Update cloud particles (shader-based version requires update call)
-  if (USE_SHADER_FOG) {
-    cloudParticles.update(dt);
-  }
+  // Update cloud particles (shader-based fog)
+  cloudParticles.update(dt);
 
   // Update desaturation effect animation
   desaturationEffect.update(dt);
