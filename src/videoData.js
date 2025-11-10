@@ -136,12 +136,6 @@ export const videos = {
     loop: false,
     muted: false,
     billboard: true,
-    criteria: {
-      heardCat: true,
-      currentState: {
-        $gte: GAME_STATES.INTRO,
-      },
-    },
     autoPlay: true,
     once: true,
     priority: 0,
