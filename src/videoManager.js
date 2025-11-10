@@ -412,8 +412,10 @@ class VideoManager {
           this.logger.log(`Cancelled delayed playback for "${videoId}"`);
         }
 
-        // Stop and remove video if it exists
-        if (exists) {
+        // Stop and remove video if it exists.
+        // Keep videos for Safari around that are preloaded and neeed to stick
+        // around until needed.
+        if (exists && videoConfig.platform !== 'safari') {
           player.destroy();
           this.videoPlayers.delete(videoId);
           this.logger.log(
