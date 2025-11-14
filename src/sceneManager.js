@@ -626,7 +626,7 @@ class SceneManager {
         (xhr) => {
           // Progress callback
           if (xhr.lengthComputable && shouldTrackProgress) {
-            const percentage = Math.round((xhr.loaded / xhr.total) * 100);
+            const percentage = Math.min(xhr.loaded / xhr.total, 1);
             this.loadingScreen.updateTask(`gltf_${id}`, percentage, 1);
           }
         },
