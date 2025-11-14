@@ -285,7 +285,7 @@ class SceneManager {
     const shouldPreload = objectData.preload === true;
     const shouldTrackProgress = shouldPreload && this.loadingScreen;
     if (shouldTrackProgress) {
-      this.loadingScreen.registerTask(`splat_${id}`, 100);
+      this.loadingScreen.registerTask(`splat_${id}`, 1);
     }
 
     // Track download progress for UI feedback
@@ -294,14 +294,6 @@ class SceneManager {
     const splatMesh = new SplatMesh({
       url: path,
       editable: false, // Don't apply SplatEdit operations to scene splats (only fog)
-      onProgress: (progress) => {
-        // Progress is a number between 0 and 1
-        downloadProgress = progress;
-        if (shouldTrackProgress) {
-          const percentage = Math.round(progress * 100);
-          this.loadingScreen.updateTask(`splat_${id}`, percentage, 1);
-        }
-      },
     });
 
     // Set quaternion if provided
@@ -350,7 +342,7 @@ class SceneManager {
     if (shouldTrackProgress) {
       // Ensure progress shows 100% even if callback didn't reach it
       if (downloadProgress < 1.0) {
-        this.loadingScreen.updateTask(`splat_${id}`, 100, 1);
+        this.loadingScreen.updateTask(`splat_${id}`, downloadProgress);
       }
     }
 
@@ -379,7 +371,7 @@ class SceneManager {
       const shouldPreload = objectData.preload === true;
       const shouldTrackProgress = shouldPreload && this.loadingScreen;
       if (shouldTrackProgress) {
-        this.loadingScreen.registerTask(`gltf_${id}`, 100);
+        this.loadingScreen.registerTask(`gltf_${id}`, 1);
       }
 
       this.gltfLoader.load(
