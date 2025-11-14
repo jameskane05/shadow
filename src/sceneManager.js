@@ -299,7 +299,7 @@ class SceneManager {
         downloadProgress = progress;
         if (shouldTrackProgress) {
           const percentage = Math.round(progress * 100);
-          this.loadingScreen.updateTask(`splat_${id}`, percentage, 100);
+          this.loadingScreen.updateTask(`splat_${id}`, percentage, 1);
         }
       },
     });
@@ -350,7 +350,7 @@ class SceneManager {
     if (shouldTrackProgress) {
       // Ensure progress shows 100% even if callback didn't reach it
       if (downloadProgress < 1.0) {
-        this.loadingScreen.updateTask(`splat_${id}`, 100, 100);
+        this.loadingScreen.updateTask(`splat_${id}`, 100, 1);
       }
     }
 
@@ -635,7 +635,7 @@ class SceneManager {
           // Progress callback
           if (xhr.lengthComputable && shouldTrackProgress) {
             const percentage = Math.round((xhr.loaded / xhr.total) * 100);
-            this.loadingScreen.updateTask(`gltf_${id}`, percentage, 100);
+            this.loadingScreen.updateTask(`gltf_${id}`, percentage, 1);
           }
         },
         (error) => {
